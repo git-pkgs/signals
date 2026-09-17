@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -118,12 +119,14 @@ func newScanStats(cache *blobCache) *scanStats {
 	return stats
 }
 
-func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) error {
+func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err error) {
 	repo, err := githistory.Open(path)
 	if err != nil {
 		return err
 	}
-	defer repo.Close()
+	defer func() {
+		err = errors.Join(err, repo.Close())
+	}()
 
 	uri, err := filepath.Abs(path)
 	if err != nil {
@@ -185,7 +188,9 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) error {
 		states[commit.Object.Hash.String()] = current
 		stats.commits++
 		if opts.Progress > 0 && stats.commits%opts.Progress == 0 {
-			fmt.Fprintf(stderr, "signals: scanned %d commits\n", stats.commits)
+			if _, err := fmt.Fprintf(stderr, "signals: scanned %d commits\n", stats.commits); err != nil {
+				return err
+			}
 		}
 		if len(commit.Object.ParentHashes) > 1 {
 			return nil
@@ -202,17 +207,23 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) error {
 					return err
 				}
 			} else {
-				fmt.Fprintf(stdout, "%s  %s  %s\n",
+				if _, err := fmt.Fprintf(stdout, "%s  %s  %s\n",
 					commit.Object.Hash.String()[:12],
 					commit.Object.Author.When.Format(time.DateOnly),
 					githistory.CommitSubject(commit.Object.Message),
-				)
+				); err != nil {
+					return err
+				}
 				for _, change := range changes {
-					fmt.Fprintf(stdout, "  %c %s\n", change.Marker, formatSignal(change.Signal))
+					if _, err := fmt.Fprintf(stdout, "  %c %s\n", change.Marker, formatSignal(change.Signal)); err != nil {
+						return err
+					}
 				}
 			}
 			for _, change := range errorChanges {
-				fmt.Fprintf(stderr, "%s  %s: %s\n", commit.Object.Hash.String()[:12], change.Check, change.Message)
+				if _, err := fmt.Fprintf(stderr, "%s  %s: %s\n", commit.Object.Hash.String()[:12], change.Check, change.Message); err != nil {
+					return err
+				}
 			}
 		}
 		return nil
@@ -223,7 +234,7 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) error {
 		}
 	}
 	if opts.Stats {
-		printStats(stderr, stats)
+		err = errors.Join(err, printStats(stderr, stats))
 	}
 	return err
 }
@@ -365,14 +376,7 @@ func writeJSONLRecord(writer io.Writer, commit *object.Commit, changes []signalC
 }
 
 func jsonSignal(signal Signal) jsonlSignal {
-	return jsonlSignal{
-		Check: signal.Check,
-		Kind:  signal.Kind,
-		Name:  signal.Name,
-		Value: signal.Value,
-		Path:  signal.Path,
-		Line:  signal.Line,
-	}
+	return jsonlSignal(signal)
 }
 
 func changeName(marker byte) string {
@@ -499,21 +503,28 @@ func removePathSignals(signals map[string]Signal, check string, paths map[string
 	}
 }
 
-func printStats(writer io.Writer, stats *scanStats) {
-	fmt.Fprintf(writer, "signals: scanned %d commits in %s\n", stats.commits, time.Since(stats.started).Round(time.Millisecond))
-	fmt.Fprintf(writer, "signals: blobs %d unique, %d reads, %d cache hits, %d bytes\n",
-		len(stats.cache.data), stats.cache.requests, stats.cache.hits, stats.cache.bytes)
+func printStats(writer io.Writer, stats *scanStats) error {
+	if _, err := fmt.Fprintf(writer, "signals: scanned %d commits in %s\n", stats.commits, time.Since(stats.started).Round(time.Millisecond)); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(writer, "signals: blobs %d unique, %d reads, %d cache hits, %d bytes\n",
+		len(stats.cache.data), stats.cache.requests, stats.cache.hits, stats.cache.bytes); err != nil {
+		return err
+	}
 	for _, detector := range scorecardDetectors {
 		result := stats.detectors[detector.name]
-		fmt.Fprintf(writer, "signals: %-24s runs=%d full=%d partial=%d skipped=%d time=%s\n",
+		if _, err := fmt.Fprintf(writer, "signals: %-24s runs=%d full=%d partial=%d skipped=%d time=%s\n",
 			detector.name,
 			result.runs,
 			result.full,
 			result.partial,
 			result.skipped,
 			result.duration.Round(time.Millisecond),
-		)
+		); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func diffSignals(previous, current map[string]Signal) []signalChange {

@@ -11,9 +11,15 @@ The local-only timeline answers questions about when repository evidence changed
 - How have workflow token permissions changed over time?
 - When did SAST, fuzzing, dependency updates, or SBOM files first appear?
 
-## Build
+## Install
 
-The project requires Go 1.26. Build the command from this checkout and place the resulting binary wherever you prefer:
+The project requires Go 1.26. Install the latest version with:
+
+```bash
+go install github.com/git-pkgs/signals@latest
+```
+
+To work from source, build the current checkout directly. This writes the binary beside the source files:
 
 ```bash
 go build -o signals .

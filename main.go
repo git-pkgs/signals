@@ -13,7 +13,9 @@ var version = "dev"
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
-		fmt.Fprintln(os.Stderr, "signals:", err)
+		if _, writeErr := fmt.Fprintln(os.Stderr, "signals:", err); writeErr != nil {
+			os.Exit(1)
+		}
 		os.Exit(1)
 	}
 }
@@ -27,8 +29,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 	case "log":
 		return runLog(args[1:], stdout, stderr)
 	case "version", "--version", "-version":
-		fmt.Fprintln(stdout, version)
-		return nil
+		_, err := fmt.Fprintln(stdout, version)
+		return err
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}

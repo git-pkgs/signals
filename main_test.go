@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -328,6 +330,47 @@ func TestRunRejectsInvalidWorkers(t *testing.T) {
 	if err == nil || err.Error() != "workers must be positive" {
 		t.Fatalf("got %v", err)
 	}
+}
+
+func TestRunPropagatesWriterErrors(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.name", "Signals Test")
+	gitRun(t, repo, "config", "user.email", "signals@example.com")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+	writeFile(t, repo, "SECURITY.md", "Report vulnerabilities to security@example.com.\n")
+	gitRun(t, repo, "add", ".")
+	gitRunAt(t, repo, "2024-01-01T12:00:00Z", "commit", "-m", "Add security policy")
+
+	tests := []struct {
+		name   string
+		args   []string
+		stdout io.Writer
+		stderr io.Writer
+	}{
+		{name: "version", args: []string{"version"}, stdout: failingWriter{}, stderr: io.Discard},
+		{name: "text", args: []string{"log", repo}, stdout: failingWriter{}, stderr: io.Discard},
+		{name: "JSONL", args: []string{"log", "--jsonl", repo}, stdout: failingWriter{}, stderr: io.Discard},
+		{name: "progress", args: []string{"log", "--progress", "1", repo}, stdout: io.Discard, stderr: failingWriter{}},
+		{name: "stats", args: []string{"log", "--stats", repo}, stdout: io.Discard, stderr: failingWriter{}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := run(test.args, test.stdout, test.stderr)
+			if !errors.Is(err, errWriteFailed) {
+				t.Fatalf("got %v, want %v", err, errWriteFailed)
+			}
+		})
+	}
+}
+
+var errWriteFailed = errors.New("write failed")
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) {
+	return 0, errWriteFailed
 }
 
 func containsJSONLChange(changes []jsonlChange, change, check, path string) bool {
