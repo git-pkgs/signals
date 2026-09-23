@@ -145,4 +145,4 @@ go test ./...
 
 ## License
 
-MIT
+[MIT](LICENSE).
