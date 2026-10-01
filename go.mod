@@ -3,7 +3,7 @@ module github.com/git-pkgs/signals
 go 1.26.0
 
 require (
-	github.com/git-pkgs/history v0.1.0
+	github.com/git-pkgs/history v0.1.1
 	github.com/go-git/go-git/v6 v6.0.0-alpha.5
 	github.com/ossf/scorecard/v5 v5.5.0
 )
