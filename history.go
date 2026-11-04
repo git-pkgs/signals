@@ -88,9 +88,11 @@ type boundarySnapshot struct {
 }
 
 type commitState struct {
-	signals   map[string]Signal
-	errors    map[string]string
-	languages languageInventory
+	signals     map[string]Signal
+	errors      map[string]string
+	languages   languageInventory
+	reuseFiles  map[string]reuseFile
+	reuseActive bool
 }
 
 type detectorStats struct {
@@ -118,6 +120,9 @@ func newScanStats(cache *blobCache) *scanStats {
 	for _, detector := range scorecardDetectors {
 		stats.detectors[detector.name] = &detectorStats{}
 	}
+	for _, name := range localDetectorNames {
+		stats.detectors[name] = &detectorStats{}
+	}
 	return stats
 }
 
@@ -129,6 +134,13 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err err
 	defer func() {
 		err = errors.Join(err, repo.Close())
 	}()
+	local, err := newLocalDetectors(context.Background(), repo)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		err = errors.Join(err, local.Close())
+	}()
 
 	uri, err := filepath.Abs(path)
 	if err != nil {
@@ -139,11 +151,11 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err err
 	states := make(map[string]commitState)
 	var startSnapshot, endSnapshot boundarySnapshot
 	if opts.Snapshots {
-		startSnapshot, err = loadBoundarySnapshot(repo.Repository(), "file://"+uri, opts.Ref, "start", opts.After, cache, stats)
+		startSnapshot, err = loadBoundarySnapshot(repo.Repository(), local, "file://"+uri, opts.Ref, "start", opts.After, cache, stats)
 		if err != nil {
 			return err
 		}
-		endSnapshot, err = loadBoundarySnapshot(repo.Repository(), "file://"+uri, opts.Ref, "end", opts.Before, cache, stats)
+		endSnapshot, err = loadBoundarySnapshot(repo.Repository(), local, "file://"+uri, opts.Ref, "end", opts.Before, cache, stats)
 		if err != nil {
 			return err
 		}
@@ -168,7 +180,7 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err err
 				if err != nil {
 					return err
 				}
-				parent, err = detectFullCommitState("file://"+uri, parentCommit, cache, stats)
+				parent, err = detectFullCommitState("file://"+uri, parentCommit, local, cache, stats)
 				if err != nil {
 					return err
 				}
@@ -183,6 +195,7 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err err
 			parent,
 			commit.Changes,
 			forceFull,
+			local,
 			cache,
 			stats,
 		)
@@ -245,6 +258,7 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err err
 
 func loadBoundarySnapshot(
 	repo *git.Repository,
+	local *localDetectors,
 	uri, ref, boundary, date string,
 	cache *blobCache,
 	stats *scanStats,
@@ -262,7 +276,7 @@ func loadBoundarySnapshot(
 		return snapshot, nil
 	}
 	snapshot.commit = commit
-	snapshot.state, err = detectFullCommitState(uri, commit, cache, stats)
+	snapshot.state, err = detectFullCommitState(uri, commit, local, cache, stats)
 	if err != nil {
 		return boundarySnapshot{}, err
 	}
@@ -393,10 +407,11 @@ func changeName(marker byte) string {
 func detectFullCommitState(
 	uri string,
 	commit *object.Commit,
+	local *localDetectors,
 	cache *blobCache,
 	stats *scanStats,
 ) (commitState, error) {
-	return detectCommitState(uri, commit, emptyCommitState(), nil, true, cache, stats)
+	return detectCommitState(uri, commit, emptyCommitState(), nil, true, local, cache, stats)
 }
 
 func detectCommitState(
@@ -405,6 +420,7 @@ func detectCommitState(
 	parent commitState,
 	changes []githistory.Change,
 	forceFull bool,
+	local *localDetectors,
 	cache *blobCache,
 	stats *scanStats,
 ) (commitState, error) {
@@ -417,13 +433,14 @@ func detectCommitState(
 	}
 	current.languages = languages
 	programmingLanguages := current.languages.scorecard()
+	languagesChanged := !parent.languages.sameLanguages(current.languages)
 	paths := changedPaths(changes)
 	var fullClient *commitClient
 
 	for _, detector := range scorecardDetectors {
 		detectorStats := stats.detectors[detector.name]
 		scope := detector.scope(paths, forceFull)
-		if detector.name == checkFuzzing && !parent.languages.sameLanguages(current.languages) {
+		if detector.name == checkFuzzing && languagesChanged {
 			scope = detectionScope{impact: impactFull}
 		}
 		if _, failed := parent.errors[detector.name]; failed && scope.impact != impactNone {
@@ -475,7 +492,7 @@ func detectCommitState(
 			current.signals[signalKey(signal)] = signal
 		}
 	}
-	return current, nil
+	return local.detect(context.Background(), commit, current, changes, forceFull, languagesChanged, cache, stats)
 }
 
 func includeForDetector(detector detector, cache *blobCache) func(string) bool {
@@ -487,17 +504,20 @@ func includeForDetector(detector detector, cache *blobCache) func(string) bool {
 
 func emptyCommitState() commitState {
 	return commitState{
-		signals:   make(map[string]Signal),
-		errors:    make(map[string]string),
-		languages: make(languageInventory),
+		signals:    make(map[string]Signal),
+		errors:     make(map[string]string),
+		languages:  make(languageInventory),
+		reuseFiles: make(map[string]reuseFile),
 	}
 }
 
 func cloneCommitState(state commitState) commitState {
 	clone := commitState{
-		signals:   make(map[string]Signal, len(state.signals)),
-		errors:    make(map[string]string, len(state.errors)),
-		languages: state.languages,
+		signals:     make(map[string]Signal, len(state.signals)),
+		errors:      make(map[string]string, len(state.errors)),
+		languages:   state.languages,
+		reuseFiles:  state.reuseFiles,
+		reuseActive: state.reuseActive,
 	}
 	for key, signal := range state.signals {
 		clone.signals[key] = signal
@@ -551,6 +571,19 @@ func printStats(writer io.Writer, stats *scanStats) error {
 		result := stats.detectors[detector.name]
 		if _, err := fmt.Fprintf(writer, "signals: %-24s runs=%d full=%d partial=%d skipped=%d time=%s\n",
 			detector.name,
+			result.runs,
+			result.full,
+			result.partial,
+			result.skipped,
+			result.duration.Round(time.Millisecond),
+		); err != nil {
+			return err
+		}
+	}
+	for _, name := range localDetectorNames {
+		result := stats.detectors[name]
+		if _, err := fmt.Fprintf(writer, "signals: %-24s runs=%d full=%d partial=%d skipped=%d time=%s\n",
+			name,
 			result.runs,
 			result.full,
 			result.partial,

@@ -143,6 +143,91 @@ func TestLogUsesLanguagesAndRolesForFuzzing(t *testing.T) {
 	}
 }
 
+func TestLogDetectsLocalToolingSecretsAndREUSEAcrossHistory(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.name", "Signals Test")
+	gitRun(t, repo, "config", "user.email", "signals@example.com")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+
+	writeFile(t, repo, "README.md", "# example\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Initial commit")
+
+	const token = "ghp_" + "16C7e42F292c6912E7710c838347Ae178B4a"
+	writeFile(t, repo, ".github/workflows/ci.yml", "name: CI\non: push\njobs: {}\n")
+	writeFile(t, repo, ".pre-commit-config.yaml", "repos: []\n")
+	writeFile(t, repo, ".semgrep.yml", "rules: []\n")
+	writeFile(t, repo, ".sops.yaml", "creation_rules: []\n")
+	writeFile(t, repo, "Makefile", "all:\n\t@true\n")
+	writeFile(t, repo, "config.yml", "token: "+token+"\n")
+	writeFile(t, repo, "licensed.txt", "SPDX-FileCopyrightText: 2026 Signals Test\nSPDX-License-Identifier: MIT\n")
+	writeFile(t, repo, "main.c", "int main(void) { return 0; }\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Add local security evidence")
+
+	for _, name := range []string{
+		".github/workflows/ci.yml",
+		".pre-commit-config.yaml",
+		".semgrep.yml",
+		".sops.yaml",
+		"config.yml",
+	} {
+		if err := os.Remove(filepath.Join(repo, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(t, repo, "licensed.txt", "Licensing pending.\n")
+	gitRun(t, repo, "add", "-A")
+	gitRun(t, repo, "commit", "-m", "Remove local security evidence")
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"log", "--jsonl", "--workers", "1", repo}, &stdout, &stderr); err != nil {
+		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
+	}
+	if strings.Contains(stdout.String(), token) {
+		t.Fatal("JSONL output contains the detected secret")
+	}
+
+	var records []jsonlRecord
+	for _, line := range strings.Split(strings.TrimSpace(stdout.String()), "\n") {
+		var record jsonlRecord
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatalf("decode JSONL: %v\n%s", err, line)
+		}
+		records = append(records, record)
+	}
+	added := findJSONLRecord(t, records, "Add local security evidence")
+	removed := findJSONLRecord(t, records, "Remove local security evidence")
+
+	expectedAdditions := []jsonlChange{
+		{Change: "added", Check: checkCI, Kind: "GitHub Actions", Path: ".github/workflows/"},
+		{Change: "added", Check: checkPreCommit, Kind: "pre-commit", Path: ".pre-commit-config.yaml"},
+		{Change: "added", Check: checkSecretsManagement, Kind: "SOPS", Path: ".sops.yaml"},
+		{Change: "added", Check: checkSecurityTool, Kind: "security-scanning", Name: "Semgrep", Path: ".semgrep.yml"},
+		{Change: "added", Check: checkBuild, Kind: "Make"},
+		{Change: "added", Check: checkSecret, Kind: "github-pat", Value: "[redacted]", Path: "config.yml", Line: 1},
+		{Change: "added", Check: checkREUSE, Kind: "declaration", Value: "MIT", Path: "licensed.txt"},
+	}
+	for _, expected := range expectedAdditions {
+		if !containsExactJSONLChange(added.Changes, expected) {
+			t.Errorf("added record missing %#v:\n%s", expected, stdout.String())
+		}
+	}
+	for _, expected := range expectedAdditions {
+		if expected.Check == checkBuild {
+			continue
+		}
+		expected.Change = "removed"
+		if !containsExactJSONLChange(removed.Changes, expected) {
+			t.Errorf("removed record missing %#v:\n%s", expected, stdout.String())
+		}
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected detection errors:\n%s", stderr.String())
+	}
+}
+
 func TestLogScansEveryDetectedLanguage(t *testing.T) {
 	repo := t.TempDir()
 	gitRun(t, repo, "init", "-b", "main")
@@ -495,6 +580,26 @@ func containsJSONLChange(changes []jsonlChange, change, check, path string) bool
 func containsJSONLSignal(signals []jsonlSignal, check, path string) bool {
 	for _, signal := range signals {
 		if signal.Check == check && signal.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
+func findJSONLRecord(t *testing.T, records []jsonlRecord, subject string) jsonlRecord {
+	t.Helper()
+	for _, record := range records {
+		if record.Subject == subject {
+			return record
+		}
+	}
+	t.Fatalf("record for %q not found: %#v", subject, records)
+	return jsonlRecord{}
+}
+
+func containsExactJSONLChange(changes []jsonlChange, expected jsonlChange) bool {
+	for _, change := range changes {
+		if change == expected {
 			return true
 		}
 	}
