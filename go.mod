@@ -4,6 +4,8 @@ go 1.27.3
 
 require (
 	github.com/git-pkgs/history v0.1.1
+	github.com/git-pkgs/languages v0.0.0-20261104135012-00c5692e3995
+	github.com/git-pkgs/roles v0.1.3
 	github.com/go-git/go-git/v6 v6.0.0-beta.1
 	github.com/ossf/scorecard/v5 v5.6.0
 )
@@ -76,6 +78,8 @@ require (
 	github.com/erikvarga/go-rpmdb v0.0.0-20250523120114-a15a62cd4593 // indirect
 	github.com/fatih/color v1.19.0 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
+	github.com/git-pkgs/magic v0.6.0 // indirect
+	github.com/git-pkgs/scan v0.1.1 // indirect
 	github.com/go-errors/errors v1.5.1 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-git/gcfg/v2 v2.0.2 // indirect

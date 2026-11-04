@@ -110,6 +110,75 @@ func TestLogComparesBranchCommitsWithTheirFirstParent(t *testing.T) {
 	}
 }
 
+func TestLogUsesLanguagesAndRolesForFuzzing(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.name", "Signals Test")
+	gitRun(t, repo, "config", "user.email", "signals@example.com")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+
+	writeFile(t, repo, "main.go", "package main\nfunc main() {}\n")
+	writeFile(t, repo, "vendor/dependency/fuzz_test.go", "package dependency\nfunc FuzzVendor(f *testing.F) {}\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Add project and vendored fuzz target")
+
+	writeFile(t, repo, "fuzz_test.go", "package main\nfunc FuzzProject(f *testing.F) {}\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Add project fuzz target")
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"log", "--workers", "1", repo}, &stdout, &stderr); err != nil {
+		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "Add project fuzz target") || !strings.Contains(output, "+ Fuzzing/fuzzer") {
+		t.Fatalf("project fuzz target missing:\n%s", output)
+	}
+	if strings.Contains(output, "vendor/dependency/fuzz_test.go") {
+		t.Fatalf("vendored fuzz target was reported:\n%s", output)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected detection errors:\n%s", stderr.String())
+	}
+}
+
+func TestLogScansEveryDetectedLanguage(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.name", "Signals Test")
+	gitRun(t, repo, "config", "user.email", "signals@example.com")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+
+	writeFile(t, repo, "main.go", "package main\nfunc main() {}\n")
+	writeFile(t, repo, "fuzz_test.go", "package main\nfunc FuzzProject(f *testing.F) {}\n")
+	writeFile(t, repo, "web/app.js", strings.Repeat("const value = 1;\n", 500))
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Add project")
+
+	if err := os.Remove(filepath.Join(repo, "web/app.js")); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Remove JavaScript")
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"log", "--workers", "1", repo}, &stdout, &stderr); err != nil {
+		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "Add project") || !strings.Contains(output, "+ Fuzzing/fuzzer") {
+		t.Fatalf("Go fuzz target missing from mixed-language project:\n%s", output)
+	}
+	if strings.Contains(output, "Remove JavaScript") {
+		t.Fatalf("removing another language changed the fuzzing signal:\n%s", output)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected detection errors:\n%s", stderr.String())
+	}
+}
+
 func TestLogWritesJSONL(t *testing.T) {
 	repo := t.TempDir()
 	gitRun(t, repo, "init", "-b", "main")

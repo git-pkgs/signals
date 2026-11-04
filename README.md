@@ -2,7 +2,7 @@
 
 A command for tracing repository-contained security signals across Git history. It shows when detected evidence appears, changes, or disappears, with the commit and path behind each change.
 
-`signals` walks commit trees with [`github.com/git-pkgs/history`](https://github.com/git-pkgs/history) and runs ten raw detectors from OpenSSF Scorecard v5.5.0. The output contains raw findings and omits score calculation. The scan reads only local Git objects, with forge APIs, release APIs, and external services disabled.
+`signals` walks commit trees with [`github.com/git-pkgs/history`](https://github.com/git-pkgs/history) and runs ten raw detectors from OpenSSF Scorecard v5.6.0. The output contains raw findings and omits score calculation. The scan reads only local Git objects, with forge APIs, release APIs, and external services disabled.
 
 The local-only timeline answers questions about when repository evidence changed. Examples include:
 
@@ -103,7 +103,7 @@ The command runs ten Scorecard checks. Several retain the repository-backed part
 | Binary-Artifacts | Binary files identified by content or extension | Successful Gradle wrapper-validation runs |
 | Dangerous-Workflow | Script injection and untrusted checkout patterns in Actions workflows | None |
 | Dependency-Update-Tool | Dependabot, Renovate, and Scala Steward configuration | Dependabot-authored commit search |
-| Fuzzing | ClusterFuzzLite configuration and source patterns for supported languages | OSS-Fuzz membership and forge language statistics |
+| Fuzzing | ClusterFuzzLite configuration and source patterns selected by the languages in each commit | OSS-Fuzz membership |
 | License | Root license filename detection | Forge license classification |
 | Pinned-Dependencies | Actions, container images, shell downloads, Dockerfiles, workflow scripts, and NuGet configuration | None |
 | SAST | Known Actions and Sonar configuration in `pom.xml` | Successful check runs |
@@ -117,11 +117,11 @@ Unsupported client methods return Scorecard's `ErrUnsupportedFeature`, and the s
 
 The root commit receives a full scan. Later commits reuse their first parent's signal state and rerun a detector only when relevant paths change. Checks with cross-file behavior, including License, SBOM, Security-Policy, dependency-update configuration, and NuGet pinning, receive a full commit tree when one of their inputs changes.
 
-File content is cached by Git blob OID for the whole run. Unchanged bytes are read once even when they appear in many commits or several detectors request them. Commit reading can run concurrently, while signal-state updates remain ordered.
+File content is cached by Git blob OID for the whole run. Unchanged bytes are read once even when they appear in many commits or several detectors request them. Commit reading can run concurrently, while signal-state updates remain ordered. Fuzzing keeps a language inventory for each commit using `github.com/git-pkgs/languages`. Unambiguous extensions need no content read; ambiguous extensions use a cached 4 KB prefix. `github.com/git-pkgs/roles` removes vendored, generated, fixture, cache, and build-output paths from that inventory and from the files scanned for fuzzing patterns. Test paths remain eligible because fuzz targets commonly use them.
 
 ## Performance
 
-One development run scanned the full Octobox history at `b71659d9399a`. Its 5,756 commits completed in 6.71 seconds with eight history workers. The run read 10,083 unique blobs, served 19,510 of 29,593 reads from the blob cache, and produced a 95 KB timeline. `Pinned-Dependencies` accounted for 5.29 seconds of detector time.
+One development run scanned the full Octobox history at `b71659d9399a`. Its 5,756 commits completed in 6.71 seconds with eight history workers. The run read 10,083 unique blobs, served 19,510 of 29,593 reads from the blob cache, and produced a 95 KB timeline. `Pinned-Dependencies` accounted for 5.29 seconds of detector time. A repeat with the language inventory completed in 6.28 seconds, including 17 milliseconds for language updates, and produced the same timeline.
 
 ## Related git-pkgs modules
 
@@ -131,6 +131,7 @@ The Scorecard dependency brings a large set of transitive packages and repeatedl
 - `github.com/git-pkgs/licenses` finds license texts, notices, and SPDX declarations.
 - `github.com/git-pkgs/manifests` parses Actions, Docker, NuGet, and other dependency files.
 - `github.com/git-pkgs/sbom` identifies and parses SPDX and CycloneDX JSON documents.
+- `github.com/git-pkgs/languages` detects source languages from paths and blob content.
 - `github.com/git-pkgs/roles` classifies CI, fuzz, legal, generated, vendored, and packaging paths.
 
 A shared Actions workflow parser could remove the largest duplication outside Pinned-Dependencies. One parsed workflow could feed Dangerous-Workflow, action pinning, SAST, Token-Permissions, Packaging, and Gradle wrapper validation.
