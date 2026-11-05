@@ -50,7 +50,7 @@ func TestPackageFileSignalsSummarizesLockfileIntegrity(t *testing.T) {
 		t.Errorf("lockfile pinning = %q", pinning.Value)
 	}
 	integrity := findPackageSignal(t, signals, checkLockfileIntegrity, "npm", "")
-	if !strings.Contains(integrity.Value, "verified=1") {
+	if integrity.Value != "declared=1; total=1" {
 		t.Errorf("lockfile integrity = %q", integrity.Value)
 	}
 }

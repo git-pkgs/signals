@@ -235,7 +235,7 @@ func lockfileSignals(path string, result *manifests.ParseResult) []Signal {
 		{
 			Check: checkLockfileIntegrity,
 			Kind:  result.Ecosystem,
-			Value: "verified=" + strconv.Itoa(integrity) +
+			Value: "declared=" + strconv.Itoa(integrity) +
 				"; total=" + strconv.Itoa(len(result.Dependencies)),
 			Path: path,
 		},
