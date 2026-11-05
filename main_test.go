@@ -12,6 +12,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	githistory "github.com/git-pkgs/history"
+	"github.com/go-git/go-git/v6/plumbing"
 )
 
 func TestLogDetectsSignalChangesAcrossHistory(t *testing.T) {
@@ -140,6 +143,237 @@ func TestLogUsesLanguagesAndRolesForFuzzing(t *testing.T) {
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("unexpected detection errors:\n%s", stderr.String())
+	}
+}
+
+func TestLogDetectsLocalToolingSecretsAndREUSEAcrossHistory(t *testing.T) {
+	const prefixBeyondCommonScanLimit = 64*1024 + 1
+
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.name", "Signals Test")
+	gitRun(t, repo, "config", "user.email", "signals@example.com")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+
+	writeFile(t, repo, "README.md", "# example\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Initial commit")
+
+	const token = "ghp_" + "16C7e42F292c6912E7710c838347Ae178B4a"
+	writeFile(t, repo, ".github/workflows/ci.yml", "name: CI\non: push\njobs: {}\n")
+	writeFile(t, repo, ".pre-commit-config.yaml", "repos: []\n")
+	writeFile(t, repo, ".semgrep.yml", "rules: []\n")
+	writeFile(t, repo, ".sops.yaml", "creation_rules: []\n")
+	writeFile(t, repo, "Makefile", "all:\n\t@true\n")
+	writeFile(t, repo, "config.yml", "token: "+token+"\n")
+	writeFile(t, repo, "licensed.txt", strings.Repeat("x", prefixBeyondCommonScanLimit)+
+		"\nSPDX-FileCopyrightText: 2026 Signals Test\nSPDX-License-Identifier: MIT\n")
+	writeFile(t, repo, "main.c", "int main(void) { return 0; }\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Add local security evidence")
+
+	for _, name := range []string{
+		".github/workflows/ci.yml",
+		".pre-commit-config.yaml",
+		".semgrep.yml",
+		".sops.yaml",
+		"config.yml",
+	} {
+		if err := os.Remove(filepath.Join(repo, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(t, repo, "licensed.txt", "Licensing pending.\n")
+	gitRun(t, repo, "add", "-A")
+	gitRun(t, repo, "commit", "-m", "Remove local security evidence")
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"log", "--jsonl", "--workers", "1", repo}, &stdout, &stderr); err != nil {
+		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
+	}
+	if strings.Contains(stdout.String(), token) {
+		t.Fatal("JSONL output contains the detected secret")
+	}
+
+	var records []jsonlRecord
+	for _, line := range strings.Split(strings.TrimSpace(stdout.String()), "\n") {
+		var record jsonlRecord
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatalf("decode JSONL: %v\n%s", err, line)
+		}
+		records = append(records, record)
+	}
+	added := findJSONLRecord(t, records, "Add local security evidence")
+	removed := findJSONLRecord(t, records, "Remove local security evidence")
+
+	expectedAdditions := []jsonlChange{
+		{Change: "added", Check: checkCI, Kind: "GitHub Actions", Path: ".github/workflows/"},
+		{Change: "added", Check: checkPreCommit, Kind: "pre-commit", Path: ".pre-commit-config.yaml"},
+		{Change: "added", Check: checkSecretsManagement, Kind: "SOPS", Path: ".sops.yaml"},
+		{Change: "added", Check: checkSecurityTool, Kind: "security-scanning", Name: "Semgrep", Path: ".semgrep.yml"},
+		{Change: "added", Check: checkBuild, Kind: "Make"},
+		{Change: "added", Check: checkSecret, Kind: "github-pat", Value: "[redacted]", Path: "config.yml", Line: 1},
+		{Change: "added", Check: checkREUSE, Kind: "declaration", Value: "MIT", Path: "licensed.txt"},
+	}
+	for _, expected := range expectedAdditions {
+		if !containsExactJSONLChange(added.Changes, expected) {
+			t.Errorf("added record missing %#v:\n%s", expected, stdout.String())
+		}
+	}
+	for _, expected := range expectedAdditions {
+		if expected.Check == checkBuild {
+			continue
+		}
+		expected.Change = "removed"
+		if !containsExactJSONLChange(removed.Changes, expected) {
+			t.Errorf("removed record missing %#v:\n%s", expected, stdout.String())
+		}
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected detection errors:\n%s", stderr.String())
+	}
+}
+
+func TestLocalDetectorsDoNotRetainBlobContents(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.name", "Signals Test")
+	gitRun(t, repo, "config", "user.email", "signals@example.com")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+
+	const token = "ghp_" + "16C7e42F292c6912E7710c838347Ae178B4a"
+	writeFile(t, repo, "oversized.data", token+"\n"+strings.Repeat("x", maxSecretBlobSize))
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Add oversized blob")
+
+	for i := range 6 {
+		writeFile(t, repo, fmt.Sprintf("history/%02d.data", i), fmt.Sprintf("revision %d\n", i))
+		gitRun(t, repo, "add", ".")
+		gitRun(t, repo, "commit", "-m", fmt.Sprintf("Add history blob %d", i))
+	}
+
+	historyRepo, err := githistory.Open(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := historyRepo.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	local, err := newLocalDetectors(t.Context(), historyRepo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := local.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	cache := newBlobCache(historyRepo.Repository())
+	stats := newScanStats(cache)
+	state := emptyCommitState()
+	first := true
+	err = historyRepo.WalkCommits(githistory.CommitOptions{Workers: 1, Merges: true}, func(commit githistory.Commit) error {
+		current, err := local.detect(t.Context(), commit.Object, state, commit.Changes, first, false, stats)
+		if err != nil {
+			return err
+		}
+		state = current
+		first = false
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cache.data) != 0 {
+		t.Fatalf("local detectors retained %d blob contents", len(cache.data))
+	}
+	for _, signal := range state.signals {
+		if signal.Check == checkSecret {
+			t.Fatalf("oversized blob produced a secret signal: %#v", signal)
+		}
+	}
+}
+
+func TestCommitStateStoreReleasesFirstParentBranches(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.name", "Signals Test")
+	gitRun(t, repo, "config", "user.email", "signals@example.com")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+
+	writeFile(t, repo, "root.txt", "root\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Root")
+	root := plumbing.NewHash(gitCommandOutput(t, repo, "rev-parse", "HEAD"))
+	gitRun(t, repo, "branch", "feature")
+
+	writeFile(t, repo, "main.txt", "main\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Main")
+	main := plumbing.NewHash(gitCommandOutput(t, repo, "rev-parse", "HEAD"))
+
+	gitRun(t, repo, "switch", "feature")
+	writeFile(t, repo, "feature.txt", "feature\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Feature")
+	feature := plumbing.NewHash(gitCommandOutput(t, repo, "rev-parse", "HEAD"))
+	gitRun(t, repo, "switch", "main")
+	gitRun(t, repo, "merge", "--no-ff", "feature", "-m", "Merge feature")
+
+	historyRepo, err := githistory.Open(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := historyRepo.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	walk, states, err := planCommitWalk(historyRepo, LogOptions{Workers: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if states.remaining[root] != 2 || states.remaining[main] != 1 || states.remaining[feature] != 0 {
+		t.Fatalf("unexpected first-parent child counts: %#v", states.remaining)
+	}
+	peak := 0
+	err = historyRepo.WalkCommits(walk, func(commit githistory.Commit) error {
+		if len(commit.Object.ParentHashes) > 0 {
+			parent := commit.Object.ParentHashes[0]
+			if _, ok := states.get(parent); !ok {
+				return fmt.Errorf("parent %s was released before %s", parent, commit.Object.Hash)
+			}
+			states.release(parent)
+		}
+		state := emptyCommitState()
+		state.reuseActive = true
+		state.reuseFiles[commit.Object.Hash.String()] = reuseFile{covered: true}
+		states.retain(commit.Object.Hash, state)
+		peak = max(peak, len(states.states))
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(states.states) != 0 {
+		t.Fatalf("retained %d commit states after the walk", len(states.states))
+	}
+	if peak > 2 {
+		t.Fatalf("peak retained states = %d, want at most 2", peak)
+	}
+}
+
+func TestReaderContainsAnyAcrossChunks(t *testing.T) {
+	marker := reuseMetadataMarkers[0]
+	prefix := strings.Repeat("x", reuseMarkerReadSize-len(marker)/2)
+	matched, err := readerContainsAny(strings.NewReader(prefix+string(marker)), reuseMetadataMarkers[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !matched {
+		t.Fatal("marker spanning read chunks was not detected")
 	}
 }
 
@@ -495,6 +729,26 @@ func containsJSONLChange(changes []jsonlChange, change, check, path string) bool
 func containsJSONLSignal(signals []jsonlSignal, check, path string) bool {
 	for _, signal := range signals {
 		if signal.Check == check && signal.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
+func findJSONLRecord(t *testing.T, records []jsonlRecord, subject string) jsonlRecord {
+	t.Helper()
+	for _, record := range records {
+		if record.Subject == subject {
+			return record
+		}
+	}
+	t.Fatalf("record for %q not found: %#v", subject, records)
+	return jsonlRecord{}
+}
+
+func containsExactJSONLChange(changes []jsonlChange, expected jsonlChange) bool {
+	for _, change := range changes {
+		if change == expected {
 			return true
 		}
 	}

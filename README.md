@@ -2,7 +2,7 @@
 
 A command for tracing repository-contained security signals across Git history. It shows when detected evidence appears, changes, or disappears, with the commit and path behind each change.
 
-`signals` walks commit trees with [`github.com/git-pkgs/history`](https://github.com/git-pkgs/history) and runs ten raw detectors from OpenSSF Scorecard v5.6.0. The output contains raw findings and omits score calculation. The scan reads only local Git objects, with forge APIs, release APIs, and external services disabled.
+`signals` walks commit trees with [`github.com/git-pkgs/history`](https://github.com/git-pkgs/history). It runs ten raw detectors from OpenSSF Scorecard v5.6.0, then adds local tool, secret, and REUSE metadata detection from git-pkgs modules. The output contains raw findings and omits score calculation. The scan reads only local Git objects, with forge APIs, release APIs, credential validation, and external services disabled.
 
 The local-only timeline answers questions about when repository evidence changed. Examples include:
 
@@ -10,6 +10,9 @@ The local-only timeline answers questions about when repository evidence changed
 - Which commit introduced an unpinned GitHub Action or container image?
 - How have workflow token permissions changed over time?
 - When did SAST, fuzzing, dependency updates, or SBOM files first appear?
+- When did a CI system, security scanner, build tool, or pre-commit runner appear?
+- Did a credential enter the history, and when was it removed from the tree?
+- How did per-file SPDX licensing coverage change?
 
 ## Install
 
@@ -113,15 +116,25 @@ The command runs ten Scorecard checks. Several retain the repository-backed part
 
 Unsupported client methods return Scorecard's `ErrUnsupportedFeature`, and the scan performs no network requests. Detector errors are reported on stderr. The previous successful state for that check remains in place until detection succeeds again.
 
+The additional detectors use the same persistent signal model:
+
+| Check | Local evidence |
+| --- | --- |
+| CI | CI configuration detected by the Brief knowledge base, including GitHub Actions, GitLab CI, Azure Pipelines, CircleCI, Jenkins, Buildkite, Drone, and Travis CI |
+| Build | Tools classified as build tools by Brief, including Make, CMake, Meson, Bazel, Buck, and language-specific build tools |
+| Security-Tool | Security tools detected by Brief, with its taxonomy function retained as the signal kind |
+| Secrets-Management | SOPS configuration |
+| Pre-Commit | pre-commit, Lefthook, Husky, and Overcommit configuration |
+| Secret | Findings from the embedded `git-pkgs/secrets` rule corpus; output contains `[redacted]` in place of the credential |
+| REUSE | Per-file SPDX license declarations, REUSE.toml or DEP5 metadata, and the number of non-empty covered files with both license and copyright information |
+
 ## History scanning
 
 The root commit receives a full scan. Later commits reuse their first parent's signal state and rerun a detector only when relevant paths change. Checks with cross-file behavior, including License, SBOM, Security-Policy, dependency-update configuration, and NuGet pinning, receive a full commit tree when one of their inputs changes.
 
 File content is cached by Git blob OID for the whole run. Unchanged bytes are read once even when they appear in many commits or several detectors request them. Commit reading can run concurrently, while signal-state updates remain ordered. Fuzzing keeps a language inventory for each commit using `github.com/git-pkgs/languages`. Unambiguous extensions need no content read; ambiguous extensions use a cached 4 KB prefix. `github.com/git-pkgs/roles` removes vendored, generated, fixture, cache, and build-output paths from that inventory and from the files scanned for fuzzing patterns. Test paths remain eligible because fuzz targets commonly use them.
 
-## Performance
-
-One development run scanned the full Octobox history at `b71659d9399a`. Its 5,756 commits completed in 6.71 seconds with eight history workers. The run read 10,083 unique blobs, served 19,510 of 29,593 reads from the blob cache, and produced a 95 KB timeline. `Pinned-Dependencies` accounted for 5.29 seconds of detector time. A repeat with the language inventory completed in 6.28 seconds, including 17 milliseconds for language updates, and produced the same timeline.
+Brief reads commit trees through `history.TreeFS` and reruns only when Brief's changed-file filter identifies an input to one of the emitted tool signals. Secret scanning updates changed paths and caches results by blob OID and path because some rules depend on the filename. REUSE metadata changes trigger a full REUSE scan; ordinary changes update the affected file state and coverage count.
 
 ## Related git-pkgs modules
 
@@ -131,8 +144,11 @@ The Scorecard dependency brings a large set of transitive packages and repeatedl
 - `github.com/git-pkgs/licenses` finds license texts, notices, and SPDX declarations.
 - `github.com/git-pkgs/manifests` parses Actions, Docker, NuGet, and other dependency files.
 - `github.com/git-pkgs/sbom` identifies and parses SPDX and CycloneDX JSON documents.
+- `github.com/git-pkgs/brief` detects CI systems, build tools, security tools, and pre-commit runners from an `fs.FS` commit tree.
 - `github.com/git-pkgs/languages` detects source languages from paths and blob content.
+- `github.com/git-pkgs/reuse` resolves SPDX headers, sidecars, REUSE.toml annotations, and DEP5 metadata from an `fs.FS` commit tree.
 - `github.com/git-pkgs/roles` classifies CI, fuzz, legal, generated, vendored, and packaging paths.
+- `github.com/git-pkgs/secrets` scans changed blob content with its embedded local rule corpus.
 
 A shared Actions workflow parser could remove the largest duplication outside Pinned-Dependencies. One parsed workflow could feed Dangerous-Workflow, action pinning, SAST, Token-Permissions, Packaging, and Gradle wrapper validation.
 

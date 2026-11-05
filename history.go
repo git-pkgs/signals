@@ -88,9 +88,16 @@ type boundarySnapshot struct {
 }
 
 type commitState struct {
-	signals   map[string]Signal
-	errors    map[string]string
-	languages languageInventory
+	signals     map[string]Signal
+	errors      map[string]string
+	languages   languageInventory
+	reuseFiles  map[string]reuseFile
+	reuseActive bool
+}
+
+type commitStateStore struct {
+	states    map[plumbing.Hash]commitState
+	remaining map[plumbing.Hash]int
 }
 
 type detectorStats struct {
@@ -118,7 +125,71 @@ func newScanStats(cache *blobCache) *scanStats {
 	for _, detector := range scorecardDetectors {
 		stats.detectors[detector.name] = &detectorStats{}
 	}
+	for _, name := range localDetectorNames {
+		stats.detectors[name] = &detectorStats{}
+	}
 	return stats
+}
+
+func planCommitWalk(repo *githistory.Repo, opts LogOptions) (githistory.CommitOptions, *commitStateStore, error) {
+	walk := githistory.CommitOptions{
+		Ref:     opts.Ref,
+		Since:   opts.Since,
+		Merges:  true,
+		Workers: opts.Workers,
+	}
+	hashes, err := repo.CommitHashes(walk)
+	if err != nil {
+		return githistory.CommitOptions{}, nil, err
+	}
+	remaining, err := firstParentChildCounts(repo.Repository(), hashes)
+	if err != nil {
+		return githistory.CommitOptions{}, nil, err
+	}
+	walk.Hashes = hashes
+	return walk, newCommitStateStore(remaining), nil
+}
+
+func firstParentChildCounts(repo *git.Repository, hashes []plumbing.Hash) (map[plumbing.Hash]int, error) {
+	counts := make(map[plumbing.Hash]int)
+	for _, hash := range hashes {
+		commit, err := repo.CommitObject(hash)
+		if err != nil {
+			return nil, err
+		}
+		if len(commit.ParentHashes) > 0 {
+			counts[commit.ParentHashes[0]]++
+		}
+	}
+	return counts, nil
+}
+
+func newCommitStateStore(remaining map[plumbing.Hash]int) *commitStateStore {
+	return &commitStateStore{
+		states:    make(map[plumbing.Hash]commitState),
+		remaining: remaining,
+	}
+}
+
+func (s *commitStateStore) get(hash plumbing.Hash) (commitState, bool) {
+	state, ok := s.states[hash]
+	return state, ok
+}
+
+func (s *commitStateStore) retain(hash plumbing.Hash, state commitState) {
+	if s.remaining[hash] == 0 {
+		return
+	}
+	s.states[hash] = state
+}
+
+func (s *commitStateStore) release(hash plumbing.Hash) {
+	s.remaining[hash]--
+	if s.remaining[hash] > 0 {
+		return
+	}
+	delete(s.remaining, hash)
+	delete(s.states, hash)
 }
 
 func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err error) {
@@ -129,6 +200,13 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err err
 	defer func() {
 		err = errors.Join(err, repo.Close())
 	}()
+	local, err := newLocalDetectors(context.Background(), repo)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		err = errors.Join(err, local.Close())
+	}()
 
 	uri, err := filepath.Abs(path)
 	if err != nil {
@@ -136,14 +214,17 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err err
 	}
 	cache := newBlobCache(repo.Repository())
 	stats := newScanStats(cache)
-	states := make(map[string]commitState)
+	walk, states, err := planCommitWalk(repo, opts)
+	if err != nil {
+		return err
+	}
 	var startSnapshot, endSnapshot boundarySnapshot
 	if opts.Snapshots {
-		startSnapshot, err = loadBoundarySnapshot(repo.Repository(), "file://"+uri, opts.Ref, "start", opts.After, cache, stats)
+		startSnapshot, err = loadBoundarySnapshot(repo.Repository(), local, "file://"+uri, opts.Ref, "start", opts.After, cache, stats)
 		if err != nil {
 			return err
 		}
-		endSnapshot, err = loadBoundarySnapshot(repo.Repository(), "file://"+uri, opts.Ref, "end", opts.Before, cache, stats)
+		endSnapshot, err = loadBoundarySnapshot(repo.Repository(), local, "file://"+uri, opts.Ref, "end", opts.Before, cache, stats)
 		if err != nil {
 			return err
 		}
@@ -151,28 +232,24 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err err
 			return err
 		}
 	}
-	err = repo.WalkCommits(githistory.CommitOptions{
-		Ref:     opts.Ref,
-		Since:   opts.Since,
-		Merges:  true,
-		Workers: opts.Workers,
-	}, func(commit githistory.Commit) error {
+	err = repo.WalkCommits(walk, func(commit githistory.Commit) error {
 		forceFull := len(commit.Object.ParentHashes) == 0
 		parent := emptyCommitState()
+		var parentHash plumbing.Hash
 		if len(commit.Object.ParentHashes) > 0 {
-			parentHash := commit.Object.ParentHashes[0]
+			parentHash = commit.Object.ParentHashes[0]
 			var ok bool
-			parent, ok = states[parentHash.String()]
+			parent, ok = states.get(parentHash)
 			if !ok {
 				parentCommit, err := repo.Repository().CommitObject(parentHash)
 				if err != nil {
 					return err
 				}
-				parent, err = detectFullCommitState("file://"+uri, parentCommit, cache, stats)
+				parent, err = detectFullCommitState("file://"+uri, parentCommit, local, cache, stats)
 				if err != nil {
 					return err
 				}
-				states[parentHash.String()] = parent
+				states.retain(parentHash, parent)
 				forceFull = true
 			}
 		}
@@ -183,13 +260,17 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err err
 			parent,
 			commit.Changes,
 			forceFull,
+			local,
 			cache,
 			stats,
 		)
 		if err != nil {
 			return err
 		}
-		states[commit.Object.Hash.String()] = current
+		if !parentHash.IsZero() {
+			states.release(parentHash)
+		}
+		states.retain(commit.Object.Hash, current)
 		stats.commits++
 		if opts.Progress > 0 && stats.commits%opts.Progress == 0 {
 			if _, err := fmt.Fprintf(stderr, "signals: scanned %d commits\n", stats.commits); err != nil {
@@ -245,6 +326,7 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err err
 
 func loadBoundarySnapshot(
 	repo *git.Repository,
+	local *localDetectors,
 	uri, ref, boundary, date string,
 	cache *blobCache,
 	stats *scanStats,
@@ -262,7 +344,7 @@ func loadBoundarySnapshot(
 		return snapshot, nil
 	}
 	snapshot.commit = commit
-	snapshot.state, err = detectFullCommitState(uri, commit, cache, stats)
+	snapshot.state, err = detectFullCommitState(uri, commit, local, cache, stats)
 	if err != nil {
 		return boundarySnapshot{}, err
 	}
@@ -393,10 +475,11 @@ func changeName(marker byte) string {
 func detectFullCommitState(
 	uri string,
 	commit *object.Commit,
+	local *localDetectors,
 	cache *blobCache,
 	stats *scanStats,
 ) (commitState, error) {
-	return detectCommitState(uri, commit, emptyCommitState(), nil, true, cache, stats)
+	return detectCommitState(uri, commit, emptyCommitState(), nil, true, local, cache, stats)
 }
 
 func detectCommitState(
@@ -405,6 +488,7 @@ func detectCommitState(
 	parent commitState,
 	changes []githistory.Change,
 	forceFull bool,
+	local *localDetectors,
 	cache *blobCache,
 	stats *scanStats,
 ) (commitState, error) {
@@ -417,13 +501,14 @@ func detectCommitState(
 	}
 	current.languages = languages
 	programmingLanguages := current.languages.scorecard()
+	languagesChanged := !parent.languages.sameLanguages(current.languages)
 	paths := changedPaths(changes)
 	var fullClient *commitClient
 
 	for _, detector := range scorecardDetectors {
 		detectorStats := stats.detectors[detector.name]
 		scope := detector.scope(paths, forceFull)
-		if detector.name == checkFuzzing && !parent.languages.sameLanguages(current.languages) {
+		if detector.name == checkFuzzing && languagesChanged {
 			scope = detectionScope{impact: impactFull}
 		}
 		if _, failed := parent.errors[detector.name]; failed && scope.impact != impactNone {
@@ -475,7 +560,7 @@ func detectCommitState(
 			current.signals[signalKey(signal)] = signal
 		}
 	}
-	return current, nil
+	return local.detect(context.Background(), commit, current, changes, forceFull, languagesChanged, stats)
 }
 
 func includeForDetector(detector detector, cache *blobCache) func(string) bool {
@@ -487,17 +572,20 @@ func includeForDetector(detector detector, cache *blobCache) func(string) bool {
 
 func emptyCommitState() commitState {
 	return commitState{
-		signals:   make(map[string]Signal),
-		errors:    make(map[string]string),
-		languages: make(languageInventory),
+		signals:    make(map[string]Signal),
+		errors:     make(map[string]string),
+		languages:  make(languageInventory),
+		reuseFiles: make(map[string]reuseFile),
 	}
 }
 
 func cloneCommitState(state commitState) commitState {
 	clone := commitState{
-		signals:   make(map[string]Signal, len(state.signals)),
-		errors:    make(map[string]string, len(state.errors)),
-		languages: state.languages,
+		signals:     make(map[string]Signal, len(state.signals)),
+		errors:      make(map[string]string, len(state.errors)),
+		languages:   state.languages,
+		reuseFiles:  state.reuseFiles,
+		reuseActive: state.reuseActive,
 	}
 	for key, signal := range state.signals {
 		clone.signals[key] = signal
@@ -551,6 +639,19 @@ func printStats(writer io.Writer, stats *scanStats) error {
 		result := stats.detectors[detector.name]
 		if _, err := fmt.Fprintf(writer, "signals: %-24s runs=%d full=%d partial=%d skipped=%d time=%s\n",
 			detector.name,
+			result.runs,
+			result.full,
+			result.partial,
+			result.skipped,
+			result.duration.Round(time.Millisecond),
+		); err != nil {
+			return err
+		}
+	}
+	for _, name := range localDetectorNames {
+		result := stats.detectors[name]
+		if _, err := fmt.Fprintf(writer, "signals: %-24s runs=%d full=%d partial=%d skipped=%d time=%s\n",
+			name,
 			result.runs,
 			result.full,
 			result.partial,
