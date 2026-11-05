@@ -347,8 +347,8 @@ func dependencyBot(name, email string) string {
 		identities []string
 		name       string
 	}{
-		{identities: []string{"dependabot", "dependabot[bot]"}, name: "Dependabot"},
-		{identities: []string{"renovate", "renovate[bot]", "renovate-bot", "renovate bot", "renovateapp.com"}, name: "Renovate"},
+		{identities: []string{"dependabot", "dependabot[bot]"}, name: dependencyToolDependabot},
+		{identities: []string{"renovate", "renovate[bot]", "renovate-bot", "renovate bot", "renovateapp.com"}, name: dependencyToolRenovate},
 		{identities: []string{"scala-steward", "scala-steward[bot]", "scala steward"}, name: "Scala Steward"},
 		{identities: []string{"greenkeeper", "greenkeeper[bot]", "greenkeeper.io"}, name: "Greenkeeper"},
 	} {

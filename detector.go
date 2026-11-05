@@ -275,7 +275,7 @@ func impactWorkflow(path string) detectionImpact {
 
 func impactDependencyUpdate(path string) detectionImpact {
 	switch strings.ToLower(path) {
-	case ".github/dependabot.yml", ".github/dependabot.yaml",
+	case dependabotYMLPath, dependabotYAMLPath,
 		"renovate.json", "renovate.json5", ".github/renovate.json", ".github/renovate.json5",
 		".gitlab/renovate.json", ".gitlab/renovate.json5", ".renovaterc", ".renovaterc.json",
 		".renovaterc.json5", ".scala-steward.conf", "scala-steward.conf",

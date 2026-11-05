@@ -74,6 +74,125 @@ jobs:
 	}
 }
 
+func TestLogDetectsDependencyUpdateConfigChanges(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.name", "Signals Test")
+	gitRun(t, repo, "config", "user.email", "signals@example.com")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+
+	writeFile(t, repo, "README.md", "# Example\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Initial commit")
+
+	writeFile(t, repo, ".github/dependabot.yml", `version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+`)
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Configure weekly updates")
+
+	writeFile(t, repo, ".github/dependabot.yml", `version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: daily
+`)
+	writeFile(t, repo, "renovate.json", `{"enabledManagers":["gomod"]}`)
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Run dependency updates daily")
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"log", repo}, &stdout, &stderr); err != nil {
+		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
+	}
+
+	output := stdout.String()
+	for _, expected := range []string{
+		"+ Dependency-Update-Config/Dependabot npm at .github/dependabot.yml = directory=/; schedule=weekly",
+		"- Dependency-Update-Config/Dependabot npm at .github/dependabot.yml = directory=/; schedule=weekly",
+		"+ Dependency-Update-Config/Dependabot npm at .github/dependabot.yml = directory=/; schedule=daily",
+		"+ Dependency-Update-Config/Renovate gomod at renovate.json:1 = enabled",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Errorf("output missing %q:\n%s", expected, output)
+		}
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected detection errors:\n%s", stderr.String())
+	}
+}
+
+func TestLogDetectsPackagePostureChanges(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.name", "Signals Test")
+	gitRun(t, repo, "config", "user.email", "signals@example.com")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+
+	writeFile(t, repo, "README.md", "# Example\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Initial commit")
+
+	writeFile(t, repo, packageJSONPath, `{
+  "name": "example",
+  "dependencies": {
+    "exact": "1.2.3",
+    "ranged": "^2.0.0"
+  }
+}`)
+	writeFile(t, repo, "package-lock.json", `{
+  "name": "example",
+  "lockfileVersion": 3,
+  "packages": {
+    "": {"dependencies": {"exact": "1.2.3", "ranged": "^2.0.0"}},
+    "node_modules/exact": {"version": "1.2.3", "integrity": "sha512-example"},
+    "node_modules/ranged": {"version": "2.1.0", "integrity": "sha512-example"}
+  }
+}`)
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Add npm dependencies")
+
+	writeFile(t, repo, packageJSONPath, `{
+  "name": "example",
+  "dependencies": {
+    "exact": "1.2.4",
+    "ranged": "^2.0.0"
+  }
+}`)
+	if err := os.Remove(filepath.Join(repo, "package-lock.json")); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "add", "-A")
+	gitRun(t, repo, "commit", "-m", "Update exact dependency without lockfile")
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"log", repo}, &stdout, &stderr); err != nil {
+		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
+	}
+
+	output := stdout.String()
+	for _, expected := range []string{
+		"+ Package-File/manifest npm at package.json",
+		"+ Package-File/lockfile npm at package-lock.json",
+		"+ Dependency-Pin/npm pkg:npm/exact at package.json = 1.2.3",
+		"- Dependency-Pin/npm pkg:npm/exact at package.json = 1.2.3",
+		"+ Dependency-Pin/npm pkg:npm/exact at package.json = 1.2.4",
+		"- Package-File/lockfile npm at package-lock.json",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Errorf("output missing %q:\n%s", expected, output)
+		}
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected detection errors:\n%s", stderr.String())
+	}
+}
+
 func TestLogComparesBranchCommitsWithTheirFirstParent(t *testing.T) {
 	repo := t.TempDir()
 	gitRun(t, repo, "init", "-b", "main")
