@@ -219,6 +219,27 @@ func TestDependencyBotDoesNotMatchEveryBot(t *testing.T) {
 	}
 }
 
+func TestDependencyBotRecognizesHistoricalDependabotIdentity(t *testing.T) {
+	for _, identity := range []struct {
+		name  string
+		email string
+	}{
+		{
+			name:  "dependabot-preview[bot]",
+			email: "27856297+dependabot-preview[bot]@users.noreply.github.com",
+		},
+		{
+			name:  "dependabot-preview[bot]",
+			email: "dependabot-preview[bot]@users.noreply.github.com",
+		},
+	} {
+		if got := dependencyBot(identity.name, identity.email); got != dependencyToolDependabot {
+			t.Errorf("dependencyBot(%q, %q) = %q, want %q",
+				identity.name, identity.email, got, dependencyToolDependabot)
+		}
+	}
+}
+
 func TestCommitStreamEvictsOutsideOrderAndKeepsRepositoryAge(t *testing.T) {
 	stream := newCommitStream(mailmap.New())
 	stream.addEntry(commitEntry(stream.mailmap, testCommitAt(t, "2024-04-02T00:00:00Z", "Bob", "bob@example.org", "Recent commit")))

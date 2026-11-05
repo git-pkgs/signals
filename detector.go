@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -129,11 +130,69 @@ func detectDangerousWorkflows(request *checker.CheckRequest) ([]Signal, error) {
 }
 
 func detectDependencyUpdateTools(request *checker.CheckRequest) ([]Signal, error) {
-	data, err := raw.DependencyUpdateTool(request.RepoClient)
+	files, err := request.RepoClient.ListFiles(func(path string) (bool, error) {
+		return dependencyUpdateToolForPath(path) != "", nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	return toolSignals(checkDependencyUpdateTool, "tool", data.Tools), nil
+	sort.Strings(files)
+
+	renovatePaths := make(map[string]string)
+	var signals []Signal
+	for _, path := range files {
+		tool := dependencyUpdateToolForPath(path)
+		if tool == dependencyToolRenovate {
+			renovatePaths[strings.ToLower(path)] = path
+			continue
+		}
+		signals = append(signals, dependencyUpdateToolSignal(tool, path))
+	}
+
+	for _, configuredPath := range renovateConfigPaths {
+		path, found := renovatePaths[strings.ToLower(configuredPath)]
+		if !found {
+			continue
+		}
+		if strings.EqualFold(path, packageJSONPath) {
+			data, err := readRepoClientFile(request.RepoClient, path)
+			if err != nil {
+				return nil, err
+			}
+			if _, parsed := parseRenovateConfig(path, data); !parsed {
+				continue
+			}
+		}
+		signals = append(signals, dependencyUpdateToolSignal(dependencyToolRenovate, path))
+		break
+	}
+	return signals, nil
+}
+
+func dependencyUpdateToolSignal(tool, path string) Signal {
+	return Signal{
+		Check: checkDependencyUpdateTool,
+		Kind:  "tool",
+		Name:  tool,
+		Path:  path,
+		Line:  1,
+	}
+}
+
+func readRepoClientFile(client clients.RepoClient, path string) ([]byte, error) {
+	reader, err := client.GetFileReader(path)
+	if err != nil {
+		return nil, fmt.Errorf("open %s: %w", path, err)
+	}
+	data, readErr := io.ReadAll(reader)
+	closeErr := reader.Close()
+	if readErr != nil {
+		return nil, fmt.Errorf("read %s: %w", path, readErr)
+	}
+	if closeErr != nil {
+		return nil, fmt.Errorf("close %s: %w", path, closeErr)
+	}
+	return data, nil
 }
 
 func detectFuzzing(request *checker.CheckRequest) ([]Signal, error) {
@@ -274,16 +333,29 @@ func impactWorkflow(path string) detectionImpact {
 }
 
 func impactDependencyUpdate(path string) detectionImpact {
-	switch strings.ToLower(path) {
-	case ".github/dependabot.yml", ".github/dependabot.yaml",
-		"renovate.json", "renovate.json5", ".github/renovate.json", ".github/renovate.json5",
-		".gitlab/renovate.json", ".gitlab/renovate.json5", ".renovaterc", ".renovaterc.json",
-		".renovaterc.json5", ".scala-steward.conf", "scala-steward.conf",
+	if dependencyUpdateToolForPath(path) != "" {
+		return impactFull
+	}
+	return impactNone
+}
+
+func dependencyUpdateToolForPath(path string) string {
+	lower := strings.ToLower(path)
+	if lower == dependabotYMLPath || lower == dependabotYAMLPath {
+		return dependencyToolDependabot
+	}
+	for _, renovatePath := range renovateConfigPaths {
+		if lower == strings.ToLower(renovatePath) {
+			return dependencyToolRenovate
+		}
+	}
+	switch lower {
+	case ".scala-steward.conf", "scala-steward.conf",
 		".github/.scala-steward.conf", ".github/scala-steward.conf",
 		".config/.scala-steward.conf", ".config/scala-steward.conf":
-		return impactFull
+		return "Scala Steward"
 	default:
-		return impactNone
+		return ""
 	}
 }
 

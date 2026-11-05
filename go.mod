@@ -7,11 +7,16 @@ require (
 	github.com/git-pkgs/history v0.2.0
 	github.com/git-pkgs/languages v0.1.0
 	github.com/git-pkgs/mailmap v0.1.1
+	github.com/git-pkgs/manifests v0.12.4
 	github.com/git-pkgs/reuse v0.2.0
 	github.com/git-pkgs/roles v0.1.3
 	github.com/git-pkgs/secrets v0.2.0
+	github.com/git-pkgs/vers v0.7.2
 	github.com/go-git/go-git/v6 v6.0.0-beta.1
 	github.com/ossf/scorecard/v5 v5.6.0
+	github.com/tidwall/jsonc v0.3.3
+	github.com/titanous/json5 v1.0.0
+	go.yaml.in/yaml/v3 v3.0.6
 )
 
 require (
@@ -100,12 +105,10 @@ require (
 	github.com/git-pkgs/codemeta v0.3.0 // indirect
 	github.com/git-pkgs/licensecheck v0.4.1 // indirect
 	github.com/git-pkgs/magic v0.6.0 // indirect
-	github.com/git-pkgs/manifests v0.12.4 // indirect
 	github.com/git-pkgs/pom v0.1.8 // indirect
 	github.com/git-pkgs/purl v0.2.1 // indirect
 	github.com/git-pkgs/scan v0.1.1 // indirect
 	github.com/git-pkgs/spdx v0.3.3 // indirect
-	github.com/git-pkgs/vers v0.7.2 // indirect
 	github.com/github/go-spdx/v2 v2.7.0 // indirect
 	github.com/gitleaks/go-gitdiff v0.9.1 // indirect
 	github.com/go-errors/errors v1.5.1 // indirect
@@ -203,7 +206,6 @@ require (
 	github.com/tetratelabs/wazero v1.12.0 // indirect
 	github.com/thoas/go-funk v0.9.3 // indirect
 	github.com/tidwall/gjson v1.19.0 // indirect
-	github.com/tidwall/jsonc v0.3.3 // indirect
 	github.com/tidwall/match v1.2.0 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/tink-crypto/tink-go/v2 v2.7.0 // indirect
@@ -233,7 +235,6 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.28.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
-	go.yaml.in/yaml/v3 v3.0.6 // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.6 // indirect
 	go4.org v0.0.0-20260112195520-a5071408f32f // indirect
 	gocloud.dev v0.46.0 // indirect

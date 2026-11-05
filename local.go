@@ -39,7 +39,13 @@ const (
 	reuseMarkerReadSize = 32 * 1024
 )
 
-var localDetectorNames = []string{detectorBrief, checkSecret, checkREUSE}
+var localDetectorNames = []string{
+	detectorBrief,
+	checkDependencyUpdateConfig,
+	detectorPackages,
+	checkSecret,
+	checkREUSE,
+}
 
 var reuseMetadataMarkers = [...][]byte{
 	[]byte("SPDX-License-Identifier:"),
@@ -53,6 +59,7 @@ type localDetectors struct {
 	briefImpact   *gitbrief.Report
 	secretScanner *scanner.Scanner
 	secretCache   map[secretCacheKey][]Signal
+	packageCache  map[packageCacheKey][]Signal
 	reuseMarkers  map[plumbing.Hash]bool
 }
 
@@ -82,6 +89,7 @@ func newLocalDetectors(ctx context.Context, repo *githistory.Repo) (*localDetect
 		knowledge:     knowledge,
 		secretScanner: secretScanner,
 		secretCache:   make(map[secretCacheKey][]Signal),
+		packageCache:  make(map[packageCacheKey][]Signal),
 		reuseMarkers:  make(map[plumbing.Hash]bool),
 	}
 	detectors.briefImpact = newBriefImpactReport(knowledge)
@@ -126,6 +134,10 @@ func (d *localDetectors) detect(
 	current := cloneCommitState(parent)
 	briefFull := forceFull || parent.errors[detectorBrief] != ""
 	briefRun := briefFull || d.briefAffected(changes, languagesChanged)
+	dependencyUpdateFull := forceFull || parent.errors[checkDependencyUpdateConfig] != ""
+	dependencyUpdateRun := dependencyUpdateFull || dependencyUpdateConfigAffected(changedPaths(changes))
+	packageFull := forceFull || parent.errors[detectorPackages] != ""
+	packageRun := packageFull || packagesAffected(changes)
 	secretFull := forceFull || parent.errors[checkSecret] != ""
 	reuseFull := forceFull || parent.errors[checkREUSE] != "" || reuseMetadataChanged(changes)
 	if !reuseFull && !parent.reuseActive {
@@ -138,7 +150,7 @@ func (d *localDetectors) detect(
 	reuseRun := reuseFull || parent.reuseActive && len(changes) > 0
 
 	var tree fs.FS
-	if briefRun || reuseRun {
+	if briefRun || dependencyUpdateRun || packageRun || reuseRun {
 		var err error
 		tree, err = d.repo.TreeFS(commit.Hash)
 		if err != nil {
@@ -147,9 +159,77 @@ func (d *localDetectors) detect(
 	}
 
 	d.runBrief(tree, briefRun, briefFull, &current, stats)
+	d.runDependencyUpdateConfigs(tree, dependencyUpdateRun, dependencyUpdateFull, &current, stats)
+	d.runPackages(tree, changes, packageRun, packageFull, &current, stats)
 	d.runSecrets(ctx, commit, changes, secretFull, &current, stats)
 	d.runREUSE(tree, changes, reuseRun, reuseFull, &current, stats)
 	return current, nil
+}
+
+func (d *localDetectors) runPackages(
+	tree fs.FS,
+	changes []githistory.Change,
+	run, forceFull bool,
+	current *commitState,
+	stats *scanStats,
+) {
+	detectorStats := stats.detectors[detectorPackages]
+	if !run {
+		detectorStats.skipped++
+		return
+	}
+	recordDetectorRun(detectorStats, forceFull)
+	started := time.Now()
+
+	var signals []Signal
+	var paths []string
+	var err error
+	if forceFull {
+		signals, err = allPackageSignals(tree)
+	} else {
+		signals, paths, err = packageSignalsForChanges(tree, changes, d.packageCache)
+	}
+	detectorStats.duration += time.Since(started)
+	if err != nil {
+		current.errors[detectorPackages] = err.Error()
+		return
+	}
+
+	delete(current.errors, detectorPackages)
+	if forceFull {
+		removePackageSignals(current.signals, nil)
+	} else {
+		pathSet := make(map[string]bool, len(paths))
+		for _, path := range paths {
+			pathSet[path] = true
+		}
+		removePackageSignals(current.signals, pathSet)
+	}
+	addSignals(current.signals, signals)
+}
+
+func (d *localDetectors) runDependencyUpdateConfigs(
+	tree fs.FS,
+	run, forceFull bool,
+	current *commitState,
+	stats *scanStats,
+) {
+	detectorStats := stats.detectors[checkDependencyUpdateConfig]
+	if !run {
+		detectorStats.skipped++
+		return
+	}
+	recordDetectorRun(detectorStats, forceFull)
+	started := time.Now()
+	signals, err := dependencyUpdateConfigSignals(tree)
+	detectorStats.duration += time.Since(started)
+	if err != nil {
+		current.errors[checkDependencyUpdateConfig] = err.Error()
+		return
+	}
+	delete(current.errors, checkDependencyUpdateConfig)
+	removeCheckSignals(current.signals, checkDependencyUpdateConfig)
+	addSignals(current.signals, signals)
 }
 
 func (d *localDetectors) runBrief(
