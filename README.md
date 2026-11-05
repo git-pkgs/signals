@@ -147,15 +147,15 @@ Brief reads commit trees through `history.TreeFS` and reruns only when Brief's c
 
 The Scorecard dependency brings a large set of transitive packages and repeatedly parses the same files for related checks. Existing git-pkgs modules already cover several parts of the scan:
 
-- `github.com/git-pkgs/magic` detects binary content.
-- `github.com/git-pkgs/licenses` finds license texts, notices, and SPDX declarations.
-- `github.com/git-pkgs/manifests` parses Actions, Docker, NuGet, and other dependency files.
-- `github.com/git-pkgs/sbom` identifies and parses SPDX and CycloneDX JSON documents.
-- `github.com/git-pkgs/brief` detects CI systems, build tools, security tools, and pre-commit runners from an `fs.FS` commit tree.
-- `github.com/git-pkgs/languages` detects source languages from paths and blob content.
-- `github.com/git-pkgs/reuse` resolves SPDX headers, sidecars, REUSE.toml annotations, and DEP5 metadata from an `fs.FS` commit tree.
-- `github.com/git-pkgs/roles` classifies CI, fuzz, legal, generated, vendored, and packaging paths.
-- `github.com/git-pkgs/secrets` scans changed blob content with its embedded local rule corpus.
+- [`github.com/git-pkgs/magic`](https://github.com/git-pkgs/magic) detects binary content.
+- [`github.com/git-pkgs/licenses`](https://github.com/git-pkgs/licenses) finds license texts, notices, and SPDX declarations.
+- [`github.com/git-pkgs/manifests`](https://github.com/git-pkgs/manifests) parses Actions, Docker, NuGet, and other dependency files.
+- [`github.com/git-pkgs/sbom`](https://github.com/git-pkgs/sbom) identifies and parses SPDX and CycloneDX JSON documents.
+- [`github.com/git-pkgs/brief`](https://github.com/git-pkgs/brief) detects CI systems, build tools, security tools, and pre-commit runners from an `fs.FS` commit tree.
+- [`github.com/git-pkgs/languages`](https://github.com/git-pkgs/languages) detects source languages from paths and blob content.
+- [`github.com/git-pkgs/reuse`](https://github.com/git-pkgs/reuse) resolves SPDX headers, sidecars, REUSE.toml annotations, and DEP5 metadata from an `fs.FS` commit tree.
+- [`github.com/git-pkgs/roles`](https://github.com/git-pkgs/roles) classifies CI, fuzz, legal, generated, vendored, and packaging paths.
+- [`github.com/git-pkgs/secrets`](https://github.com/git-pkgs/secrets) scans changed blob content with its embedded local rule corpus.
 
 A shared Actions workflow parser could remove the largest duplication outside Pinned-Dependencies. One parsed workflow could feed Dangerous-Workflow, action pinning, SAST, Token-Permissions, Packaging, and Gradle wrapper validation.
 
