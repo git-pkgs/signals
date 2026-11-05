@@ -237,6 +237,52 @@ func TestLogDetectsPackagePostureChanges(t *testing.T) {
 	}
 }
 
+func TestLogDetectsPackageManagerChanges(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.name", "Signals Test")
+	gitRun(t, repo, "config", "user.email", "signals@example.com")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+
+	writeFile(t, repo, "README.md", "# Example\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Initial commit")
+
+	writeFile(t, repo, "apps/tool/example.nimble", "version = \"0.1.0\"\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Add Nimble project")
+
+	writeFile(t, repo, "apps/tool/nimble.lock", "{}\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Lock Nimble dependencies")
+
+	if err := os.RemoveAll(filepath.Join(repo, "apps/tool")); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "add", "-A")
+	gitRun(t, repo, "commit", "-m", "Remove Nimble project")
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"log", "--workers", "1", repo}, &stdout, &stderr); err != nil {
+		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
+	}
+
+	output := stdout.String()
+	for _, expected := range []string{
+		"+ Package-Manager/nimble nimble at apps/tool",
+		"+ Package-File/lockfile nimble at apps/tool/nimble.lock",
+		"- Package-Manager/nimble nimble at apps/tool",
+		"- Package-File/lockfile nimble at apps/tool/nimble.lock",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Errorf("output missing %q:\n%s", expected, output)
+		}
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected detection errors:\n%s", stderr.String())
+	}
+}
+
 func TestLogComparesBranchCommitsWithTheirFirstParent(t *testing.T) {
 	repo := t.TempDir()
 	gitRun(t, repo, "init", "-b", "main")

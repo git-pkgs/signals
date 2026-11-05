@@ -43,6 +43,7 @@ var localDetectorNames = []string{
 	detectorBrief,
 	checkDependencyUpdateConfig,
 	detectorPackages,
+	detectorPackageManagers,
 	checkSecret,
 	checkREUSE,
 }
@@ -54,13 +55,14 @@ var reuseMetadataMarkers = [...][]byte{
 }
 
 type localDetectors struct {
-	repo          *githistory.Repo
-	knowledge     *kb.KnowledgeBase
-	briefImpact   *gitbrief.Report
-	secretScanner *scanner.Scanner
-	secretCache   map[secretCacheKey][]Signal
-	packageCache  map[packageCacheKey][]Signal
-	reuseMarkers  map[plumbing.Hash]bool
+	repo            *githistory.Repo
+	knowledge       *kb.KnowledgeBase
+	briefImpact     *gitbrief.Report
+	secretScanner   *scanner.Scanner
+	secretCache     map[secretCacheKey][]Signal
+	packageCache    map[packageCacheKey][]Signal
+	packageManagers *packageManagerDetector
+	reuseMarkers    map[plumbing.Hash]bool
 }
 
 type secretCacheKey struct {
@@ -79,18 +81,23 @@ func newLocalDetectors(ctx context.Context, repo *githistory.Repo) (*localDetect
 	if err != nil {
 		return nil, fmt.Errorf("load Brief knowledge base: %w", err)
 	}
+	packageManagers, err := newPackageManagerDetector()
+	if err != nil {
+		return nil, err
+	}
 	secretScanner, err := scanner.New(ctx, scanner.Options{})
 	if err != nil {
 		return nil, fmt.Errorf("create secret scanner: %w", err)
 	}
 	knowledge = signalKnowledgeBase(knowledge)
 	detectors := &localDetectors{
-		repo:          repo,
-		knowledge:     knowledge,
-		secretScanner: secretScanner,
-		secretCache:   make(map[secretCacheKey][]Signal),
-		packageCache:  make(map[packageCacheKey][]Signal),
-		reuseMarkers:  make(map[plumbing.Hash]bool),
+		repo:            repo,
+		knowledge:       knowledge,
+		secretScanner:   secretScanner,
+		secretCache:     make(map[secretCacheKey][]Signal),
+		packageCache:    make(map[packageCacheKey][]Signal),
+		packageManagers: packageManagers,
+		reuseMarkers:    make(map[plumbing.Hash]bool),
 	}
 	detectors.briefImpact = newBriefImpactReport(knowledge)
 	return detectors, nil
@@ -138,6 +145,9 @@ func (d *localDetectors) detect(
 	dependencyUpdateRun := dependencyUpdateFull || dependencyUpdateConfigAffected(changedPaths(changes))
 	packageFull := forceFull || parent.errors[detectorPackages] != ""
 	packageRun := packageFull || packagesAffected(changes)
+	managerDirectories, managerImpactErr := d.packageManagers.directoriesForChanges(changes)
+	managerFull := forceFull || parent.errors[detectorPackageManagers] != ""
+	managerRun := managerFull || managerImpactErr != nil || len(managerDirectories) > 0
 	secretFull := forceFull || parent.errors[checkSecret] != ""
 	reuseFull := forceFull || parent.errors[checkREUSE] != "" || reuseMetadataChanged(changes)
 	if !reuseFull && !parent.reuseActive {
@@ -150,7 +160,7 @@ func (d *localDetectors) detect(
 	reuseRun := reuseFull || parent.reuseActive && len(changes) > 0
 
 	var tree fs.FS
-	if briefRun || dependencyUpdateRun || packageRun || reuseRun {
+	if briefRun || dependencyUpdateRun || packageRun || managerRun || reuseRun {
 		var err error
 		tree, err = d.repo.TreeFS(commit.Hash)
 		if err != nil {
@@ -161,9 +171,60 @@ func (d *localDetectors) detect(
 	d.runBrief(tree, briefRun, briefFull, &current, stats)
 	d.runDependencyUpdateConfigs(tree, dependencyUpdateRun, dependencyUpdateFull, &current, stats)
 	d.runPackages(tree, changes, packageRun, packageFull, &current, stats)
+	d.runPackageManagers(
+		tree,
+		managerDirectories,
+		managerImpactErr,
+		managerRun,
+		managerFull,
+		&current,
+		stats,
+	)
 	d.runSecrets(ctx, commit, changes, secretFull, &current, stats)
 	d.runREUSE(tree, changes, reuseRun, reuseFull, &current, stats)
 	return current, nil
+}
+
+func (d *localDetectors) runPackageManagers(
+	tree fs.FS,
+	directories []string,
+	impactErr error,
+	run, forceFull bool,
+	current *commitState,
+	stats *scanStats,
+) {
+	detectorStats := stats.detectors[detectorPackageManagers]
+	if !run {
+		detectorStats.skipped++
+		return
+	}
+	recordDetectorRun(detectorStats, forceFull)
+	started := time.Now()
+	if impactErr != nil {
+		detectorStats.duration += time.Since(started)
+		current.errors[detectorPackageManagers] = impactErr.Error()
+		return
+	}
+
+	var err error
+	if forceFull {
+		directories, err = d.packageManagers.directoriesForTree(tree)
+	}
+	var signals []Signal
+	if err == nil {
+		signals, err = d.packageManagers.signals(tree, directories)
+	}
+	if err == nil {
+		err = d.packageManagers.removeSignals(current.signals, directories, forceFull)
+	}
+	detectorStats.duration += time.Since(started)
+	if err != nil {
+		current.errors[detectorPackageManagers] = err.Error()
+		return
+	}
+
+	delete(current.errors, detectorPackageManagers)
+	addSignals(current.signals, signals)
 }
 
 func (d *localDetectors) runPackages(

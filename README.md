@@ -132,6 +132,8 @@ The additional detectors use the same persistent signal model:
 | Security-Tool | Security tools detected by Brief, with its taxonomy function retained as the signal kind |
 | Secrets-Management | SOPS configuration |
 | Pre-Commit | pre-commit, Lefthook, Husky, and Overcommit configuration |
+| Package-Manager | The selected package manager for each detected package ecosystem and project directory |
+| Package-File | Manifest and lockfile presence, including files recognized by package-manager definitions before dependency parsing is available |
 | Secret | Findings from the embedded `git-pkgs/secrets` rule corpus; output contains `[redacted]` in place of the credential |
 | REUSE | Per-file SPDX license declarations, REUSE.toml or DEP5 metadata, and the number of non-empty covered files with both license and copyright information |
 
@@ -141,7 +143,7 @@ The root commit receives a full scan. Later commits reuse their first parent's s
 
 File content is cached by Git blob OID for the whole run. Unchanged bytes are read once even when they appear in many commits or several detectors request them. Commit reading can run concurrently, while signal-state updates remain ordered. Fuzzing keeps a language inventory for each commit using `github.com/git-pkgs/languages`. Unambiguous extensions need no content read; ambiguous extensions use a cached 4 KB prefix. `github.com/git-pkgs/roles` removes vendored, generated, fixture, cache, and build-output paths from that inventory and from the files scanned for fuzzing patterns. Test paths remain eligible because fuzz targets commonly use them.
 
-Brief reads commit trees through `history.TreeFS` and reruns only when Brief's changed-file filter identifies an input to one of the emitted tool signals. Secret scanning updates changed paths and caches results by blob OID and path because some rules depend on the filename. REUSE metadata changes trigger a full REUSE scan; ordinary changes update the affected file state and coverage count.
+Brief reads commit trees through `history.TreeFS` and reruns only when Brief's changed-file filter identifies an input to one of the emitted tool signals. Package-manager detection uses `managers.AffectedDirectories` to rescan only projects whose manager files changed. Secret scanning updates changed paths and caches results by blob OID and path because some rules depend on the filename. REUSE metadata changes trigger a full REUSE scan; ordinary changes update the affected file state and coverage count.
 
 ## Related git-pkgs modules
 
@@ -150,6 +152,7 @@ The Scorecard dependency brings a large set of transitive packages and repeatedl
 - [`github.com/git-pkgs/magic`](https://github.com/git-pkgs/magic) detects binary content.
 - [`github.com/git-pkgs/licenses`](https://github.com/git-pkgs/licenses) finds license texts, notices, and SPDX declarations.
 - [`github.com/git-pkgs/manifests`](https://github.com/git-pkgs/manifests) parses Actions, Docker, NuGet, and other dependency files.
+- [`github.com/git-pkgs/managers`](https://github.com/git-pkgs/managers) identifies package managers and their manifest or lockfile evidence from commit trees.
 - [`github.com/git-pkgs/sbom`](https://github.com/git-pkgs/sbom) identifies and parses SPDX and CycloneDX JSON documents.
 - [`github.com/git-pkgs/brief`](https://github.com/git-pkgs/brief) detects CI systems, build tools, security tools, and pre-commit runners from an `fs.FS` commit tree.
 - [`github.com/git-pkgs/languages`](https://github.com/git-pkgs/languages) detects source languages from paths and blob content.

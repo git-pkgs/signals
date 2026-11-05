@@ -7,6 +7,7 @@ require (
 	github.com/git-pkgs/history v0.2.0
 	github.com/git-pkgs/languages v0.1.0
 	github.com/git-pkgs/mailmap v0.1.1
+	github.com/git-pkgs/managers v0.12.1-0.20261105210959-0c5f2c9d8e26
 	github.com/git-pkgs/manifests v0.12.4
 	github.com/git-pkgs/reuse v0.2.0
 	github.com/git-pkgs/roles v0.1.3
