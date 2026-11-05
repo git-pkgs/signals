@@ -100,11 +100,17 @@ updates:
   - package-ecosystem: npm
     directory: /
     schedule:
-      interval: daily
+      interval: cron
+      cronjob: "0 8 * * 1"
+    cooldown:
+      default-days: 7
 `)
-	writeFile(t, repo, "renovate.json", `{"enabledManagers":["gomod"]}`)
+	writeFile(t, repo, "renovate.json5", `{
+  enabledManagers: ['gomod'],
+  extends: ['config:recommended'],
+}`)
 	gitRun(t, repo, "add", ".")
-	gitRun(t, repo, "commit", "-m", "Run dependency updates daily")
+	gitRun(t, repo, "commit", "-m", "Configure dependency update policy")
 
 	var stdout, stderr bytes.Buffer
 	if err := run([]string{"log", repo}, &stdout, &stderr); err != nil {
@@ -115,8 +121,46 @@ updates:
 	for _, expected := range []string{
 		"+ Dependency-Update-Config/Dependabot npm at .github/dependabot.yml = directory=/; schedule=weekly",
 		"- Dependency-Update-Config/Dependabot npm at .github/dependabot.yml = directory=/; schedule=weekly",
-		"+ Dependency-Update-Config/Dependabot npm at .github/dependabot.yml = directory=/; schedule=daily",
-		"+ Dependency-Update-Config/Renovate gomod at renovate.json:1 = enabled",
+		"+ Dependency-Update-Config/Dependabot npm at .github/dependabot.yml = directory=/; schedule=cron; cronjob=0 8 * * 1; cooldown=default-days:7",
+		"+ Dependency-Update-Config/Renovate gomod at renovate.json5:1 = enabled",
+		"+ Dependency-Update-Tool/tool Renovate at renovate.json5:1",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Errorf("output missing %q:\n%s", expected, output)
+		}
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected detection errors:\n%s", stderr.String())
+	}
+}
+
+func TestLogDetectsRenovateInPackageJSON(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.name", "Signals Test")
+	gitRun(t, repo, "config", "user.email", "signals@example.com")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+
+	writeFile(t, repo, packageJSONPath, `{"name":"example"}`)
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Initial commit")
+
+	writeFile(t, repo, packageJSONPath, `{
+  "name": "example",
+  "renovate": "config:recommended"
+}`)
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Configure Renovate")
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"log", repo}, &stdout, &stderr); err != nil {
+		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
+	}
+
+	output := stdout.String()
+	for _, expected := range []string{
+		"+ Dependency-Update-Config/Renovate config at package.json:1 = extends=config:recommended",
+		"+ Dependency-Update-Tool/tool Renovate at package.json:1",
 	} {
 		if !strings.Contains(output, expected) {
 			t.Errorf("output missing %q:\n%s", expected, output)

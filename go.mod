@@ -15,6 +15,7 @@ require (
 	github.com/go-git/go-git/v6 v6.0.0-beta.1
 	github.com/ossf/scorecard/v5 v5.6.0
 	github.com/tidwall/jsonc v0.3.3
+	github.com/titanous/json5 v1.0.0
 	go.yaml.in/yaml/v3 v3.0.6
 )
 
