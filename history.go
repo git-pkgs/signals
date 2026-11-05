@@ -95,6 +95,11 @@ type commitState struct {
 	reuseActive bool
 }
 
+type commitStateStore struct {
+	states    map[plumbing.Hash]commitState
+	remaining map[plumbing.Hash]int
+}
+
 type detectorStats struct {
 	runs     int
 	full     int
@@ -126,6 +131,67 @@ func newScanStats(cache *blobCache) *scanStats {
 	return stats
 }
 
+func planCommitWalk(repo *githistory.Repo, opts LogOptions) (githistory.CommitOptions, *commitStateStore, error) {
+	walk := githistory.CommitOptions{
+		Ref:     opts.Ref,
+		Since:   opts.Since,
+		Merges:  true,
+		Workers: opts.Workers,
+	}
+	hashes, err := repo.CommitHashes(walk)
+	if err != nil {
+		return githistory.CommitOptions{}, nil, err
+	}
+	remaining, err := firstParentChildCounts(repo.Repository(), hashes)
+	if err != nil {
+		return githistory.CommitOptions{}, nil, err
+	}
+	walk.Hashes = hashes
+	return walk, newCommitStateStore(remaining), nil
+}
+
+func firstParentChildCounts(repo *git.Repository, hashes []plumbing.Hash) (map[plumbing.Hash]int, error) {
+	counts := make(map[plumbing.Hash]int)
+	for _, hash := range hashes {
+		commit, err := repo.CommitObject(hash)
+		if err != nil {
+			return nil, err
+		}
+		if len(commit.ParentHashes) > 0 {
+			counts[commit.ParentHashes[0]]++
+		}
+	}
+	return counts, nil
+}
+
+func newCommitStateStore(remaining map[plumbing.Hash]int) *commitStateStore {
+	return &commitStateStore{
+		states:    make(map[plumbing.Hash]commitState),
+		remaining: remaining,
+	}
+}
+
+func (s *commitStateStore) get(hash plumbing.Hash) (commitState, bool) {
+	state, ok := s.states[hash]
+	return state, ok
+}
+
+func (s *commitStateStore) retain(hash plumbing.Hash, state commitState) {
+	if s.remaining[hash] == 0 {
+		return
+	}
+	s.states[hash] = state
+}
+
+func (s *commitStateStore) release(hash plumbing.Hash) {
+	s.remaining[hash]--
+	if s.remaining[hash] > 0 {
+		return
+	}
+	delete(s.remaining, hash)
+	delete(s.states, hash)
+}
+
 func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err error) {
 	repo, err := githistory.Open(path)
 	if err != nil {
@@ -148,7 +214,10 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err err
 	}
 	cache := newBlobCache(repo.Repository())
 	stats := newScanStats(cache)
-	states := make(map[string]commitState)
+	walk, states, err := planCommitWalk(repo, opts)
+	if err != nil {
+		return err
+	}
 	var startSnapshot, endSnapshot boundarySnapshot
 	if opts.Snapshots {
 		startSnapshot, err = loadBoundarySnapshot(repo.Repository(), local, "file://"+uri, opts.Ref, "start", opts.After, cache, stats)
@@ -163,18 +232,14 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err err
 			return err
 		}
 	}
-	err = repo.WalkCommits(githistory.CommitOptions{
-		Ref:     opts.Ref,
-		Since:   opts.Since,
-		Merges:  true,
-		Workers: opts.Workers,
-	}, func(commit githistory.Commit) error {
+	err = repo.WalkCommits(walk, func(commit githistory.Commit) error {
 		forceFull := len(commit.Object.ParentHashes) == 0
 		parent := emptyCommitState()
+		var parentHash plumbing.Hash
 		if len(commit.Object.ParentHashes) > 0 {
-			parentHash := commit.Object.ParentHashes[0]
+			parentHash = commit.Object.ParentHashes[0]
 			var ok bool
-			parent, ok = states[parentHash.String()]
+			parent, ok = states.get(parentHash)
 			if !ok {
 				parentCommit, err := repo.Repository().CommitObject(parentHash)
 				if err != nil {
@@ -184,7 +249,7 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err err
 				if err != nil {
 					return err
 				}
-				states[parentHash.String()] = parent
+				states.retain(parentHash, parent)
 				forceFull = true
 			}
 		}
@@ -202,7 +267,10 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err err
 		if err != nil {
 			return err
 		}
-		states[commit.Object.Hash.String()] = current
+		if !parentHash.IsZero() {
+			states.release(parentHash)
+		}
+		states.retain(commit.Object.Hash, current)
 		stats.commits++
 		if opts.Progress > 0 && stats.commits%opts.Progress == 0 {
 			if _, err := fmt.Fprintf(stderr, "signals: scanned %d commits\n", stats.commits); err != nil {

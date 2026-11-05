@@ -14,6 +14,7 @@ import (
 	"time"
 
 	githistory "github.com/git-pkgs/history"
+	"github.com/go-git/go-git/v6/plumbing"
 )
 
 func TestLogDetectsSignalChangesAcrossHistory(t *testing.T) {
@@ -292,6 +293,75 @@ func TestLocalDetectorsDoNotRetainBlobContents(t *testing.T) {
 		if signal.Check == checkSecret {
 			t.Fatalf("oversized blob produced a secret signal: %#v", signal)
 		}
+	}
+}
+
+func TestCommitStateStoreReleasesFirstParentBranches(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.name", "Signals Test")
+	gitRun(t, repo, "config", "user.email", "signals@example.com")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+
+	writeFile(t, repo, "root.txt", "root\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Root")
+	root := plumbing.NewHash(gitCommandOutput(t, repo, "rev-parse", "HEAD"))
+	gitRun(t, repo, "branch", "feature")
+
+	writeFile(t, repo, "main.txt", "main\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Main")
+	main := plumbing.NewHash(gitCommandOutput(t, repo, "rev-parse", "HEAD"))
+
+	gitRun(t, repo, "switch", "feature")
+	writeFile(t, repo, "feature.txt", "feature\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Feature")
+	feature := plumbing.NewHash(gitCommandOutput(t, repo, "rev-parse", "HEAD"))
+	gitRun(t, repo, "switch", "main")
+	gitRun(t, repo, "merge", "--no-ff", "feature", "-m", "Merge feature")
+
+	historyRepo, err := githistory.Open(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := historyRepo.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	walk, states, err := planCommitWalk(historyRepo, LogOptions{Workers: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if states.remaining[root] != 2 || states.remaining[main] != 1 || states.remaining[feature] != 0 {
+		t.Fatalf("unexpected first-parent child counts: %#v", states.remaining)
+	}
+	peak := 0
+	err = historyRepo.WalkCommits(walk, func(commit githistory.Commit) error {
+		if len(commit.Object.ParentHashes) > 0 {
+			parent := commit.Object.ParentHashes[0]
+			if _, ok := states.get(parent); !ok {
+				return fmt.Errorf("parent %s was released before %s", parent, commit.Object.Hash)
+			}
+			states.release(parent)
+		}
+		state := emptyCommitState()
+		state.reuseActive = true
+		state.reuseFiles[commit.Object.Hash.String()] = reuseFile{covered: true}
+		states.retain(commit.Object.Hash, state)
+		peak = max(peak, len(states.states))
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(states.states) != 0 {
+		t.Fatalf("retained %d commit states after the walk", len(states.states))
+	}
+	if peak > 2 {
+		t.Fatalf("peak retained states = %d, want at most 2", peak)
 	}
 }
 
