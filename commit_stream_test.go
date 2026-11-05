@@ -123,7 +123,7 @@ func TestLogSnapshotsIncludeCommitMetrics(t *testing.T) {
 	assertDaysMetric(t, snapshots[1].Metrics, "days-since-commit", 41)
 }
 
-func TestLogSnapshotMetricsSortNonMonotonicCommitterDates(t *testing.T) {
+func TestLogSnapshotsHandleNonMonotonicCommitterDates(t *testing.T) {
 	repo := t.TempDir()
 	gitRun(t, repo, "init", "-b", "main")
 	gitRun(t, repo, "config", "user.name", "Signals Test")
@@ -138,9 +138,10 @@ func TestLogSnapshotMetricsSortNonMonotonicCommitterDates(t *testing.T) {
 	gitRun(t, repo, "add", ".")
 	gitRunAt(t, repo, "2024-04-15T00:00:00Z", "commit", "-m", "Future-dated parent")
 
-	writeFile(t, repo, "child.txt", "child\n")
+	writeFile(t, repo, "SECURITY.md", "Report vulnerabilities to security@example.com.\n")
 	gitRun(t, repo, "add", ".")
 	gitRunAt(t, repo, "2024-04-01T00:00:00Z", "commit", "-m", "Earlier-dated child")
+	child := gitOutput(t, repo, "rev-parse", "HEAD")
 
 	var stdout, stderr bytes.Buffer
 	if err := run([]string{
@@ -156,6 +157,12 @@ func TestLogSnapshotMetricsSortNonMonotonicCommitterDates(t *testing.T) {
 	}
 	assertCountMetric(t, snapshots[0].Metrics, checkMaintained, "commits", "", 1)
 	assertCountMetric(t, snapshots[1].Metrics, checkMaintained, "commits", "", 2)
+	if snapshots[1].Commit != child {
+		t.Errorf("end snapshot commit = %q, want child %q", snapshots[1].Commit, child)
+	}
+	if !containsJSONLSignal(snapshots[1].Signals, checkSecurityPolicy, "SECURITY.md") {
+		t.Errorf("end snapshot omits child security policy: %#v", snapshots[1].Signals)
+	}
 }
 
 func TestLogFormatsTextCommitDatesInUTC(t *testing.T) {
@@ -214,8 +221,8 @@ func TestDependencyBotDoesNotMatchEveryBot(t *testing.T) {
 
 func TestCommitStreamEvictsOutsideOrderAndKeepsRepositoryAge(t *testing.T) {
 	stream := newCommitStream(mailmap.New())
-	stream.add(testCommitAt(t, "2024-04-02T00:00:00Z", "Bob", "bob@example.org", "Recent commit"))
-	stream.add(testCommitAt(t, "2024-01-01T00:00:00Z", "Alice", "alice@example.org", "Initial commit"))
+	stream.addEntry(commitEntry(stream.mailmap, testCommitAt(t, "2024-04-02T00:00:00Z", "Bob", "bob@example.org", "Recent commit")))
+	stream.addEntry(commitEntry(stream.mailmap, testCommitAt(t, "2024-01-01T00:00:00Z", "Alice", "alice@example.org", "Initial commit")))
 
 	metrics := stream.metricsAt(mustTime(t, "2024-04-03T00:00:00Z"))
 	assertCountMetric(t, metrics, checkMaintained, "commits", "", 1)

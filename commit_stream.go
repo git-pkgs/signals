@@ -202,10 +202,6 @@ func newCommitStream(mm *mailmap.Mailmap) *commitStream {
 	}
 }
 
-func (s *commitStream) add(commit *object.Commit) {
-	s.addEntry(commitEntry(s.mailmap, commit))
-}
-
 func commitEntry(mm *mailmap.Mailmap, commit *object.Commit) commitWindowEntry {
 	entry := commitWindowEntry{
 		committedAt: commit.Committer.When,

@@ -345,14 +345,12 @@ func findFirstParentBefore(repo *git.Repository, ref, before string) (*object.Co
 	if err != nil {
 		return nil, err
 	}
-	var candidate *object.Commit
 	for {
-		if commit.Committer.When.Before(boundary) &&
-			(candidate == nil || commit.Committer.When.After(candidate.Committer.When)) {
-			candidate = commit
+		if commit.Committer.When.Before(boundary) {
+			return commit, nil
 		}
 		if len(commit.ParentHashes) == 0 {
-			return candidate, nil
+			return nil, nil
 		}
 		commit, err = repo.CommitObject(commit.ParentHashes[0])
 		if err != nil {
