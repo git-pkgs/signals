@@ -13,7 +13,7 @@ The local-only timeline answers questions about when repository evidence changed
 
 ## Install
 
-The project requires Go 1.27. Install the latest version with:
+The project requires Go 1.27.3 or later. Install the latest version with:
 
 ```bash
 go install github.com/git-pkgs/signals@latest
