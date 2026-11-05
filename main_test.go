@@ -179,6 +179,47 @@ func TestLogScansEveryDetectedLanguage(t *testing.T) {
 	}
 }
 
+func TestLogRebuildsLanguagesAtShallowBoundary(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.name", "Signals Test")
+	gitRun(t, repo, "config", "user.email", "signals@example.com")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+
+	writeFile(t, repo, "old.c", "int old_value;\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Add C source")
+
+	if err := os.Remove(filepath.Join(repo, "old.c")); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, repo, "main.go", "package main\n")
+	gitRun(t, repo, "add", "-A")
+	gitRun(t, repo, "commit", "-m", "Replace C with Go")
+	boundary := gitCommandOutput(t, repo, "rev-parse", "HEAD")
+
+	writeFile(t, repo, "new.c", "int new_value;\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Add C again")
+	writeFile(t, repo, ".git/shallow", boundary+"\n")
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"log", "--stats", "--workers", "1", repo}, &stdout, &stderr); err != nil {
+		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
+	}
+
+	var fuzzingStats string
+	for _, line := range strings.Split(stderr.String(), "\n") {
+		if strings.HasPrefix(line, "signals: Fuzzing") {
+			fuzzingStats = line
+			break
+		}
+	}
+	if !strings.Contains(fuzzingStats, "runs=3 full=3 partial=0") {
+		t.Fatalf("Fuzzing stats = %q, want three full scans\nstderr:\n%s", fuzzingStats, stderr.String())
+	}
+}
+
 func TestLogWritesJSONL(t *testing.T) {
 	repo := t.TempDir()
 	gitRun(t, repo, "init", "-b", "main")
@@ -467,6 +508,17 @@ func gitRun(t *testing.T, dir string, args ...string) {
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, output)
 	}
+}
+
+func gitCommandOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, output)
+	}
+	return strings.TrimSpace(string(output))
 }
 
 func gitRunAt(t *testing.T, dir, date string, args ...string) {

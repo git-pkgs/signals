@@ -337,6 +337,11 @@ func includeFuzzingPath(path string) bool {
 	return err == nil && include
 }
 
+func (c *blobCache) includeFuzzingPath(path string) bool {
+	info, err := c.languagePath(path)
+	return err == nil && info.include
+}
+
 func (i languageInventory) scorecard() []clients.Language {
 	names := make([]clients.LanguageName, 0, len(i))
 	for name := range i {

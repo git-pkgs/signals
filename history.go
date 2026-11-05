@@ -157,6 +157,7 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err err
 		Merges:  true,
 		Workers: opts.Workers,
 	}, func(commit githistory.Commit) error {
+		forceFull := len(commit.Object.ParentHashes) == 0
 		parent := emptyCommitState()
 		if len(commit.Object.ParentHashes) > 0 {
 			parentHash := commit.Object.ParentHashes[0]
@@ -172,6 +173,7 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err err
 					return err
 				}
 				states[parentHash.String()] = parent
+				forceFull = true
 			}
 		}
 
@@ -180,7 +182,7 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err err
 			commit.Object,
 			parent,
 			commit.Changes,
-			len(commit.Object.ParentHashes) == 0,
+			forceFull,
 			cache,
 			stats,
 		)
@@ -434,11 +436,12 @@ func detectCommitState(
 
 		var client *commitClient
 		var err error
+		include := includeForDetector(detector, cache)
 		switch scope.impact {
 		case impactFull:
 			detectorStats.full++
-			if detector.include != nil {
-				client, err = newCommitClient(uri, commit, cache, nil, detector.include, programmingLanguages)
+			if include != nil {
+				client, err = newCommitClient(uri, commit, cache, nil, include, programmingLanguages)
 			} else {
 				if fullClient == nil {
 					fullClient, err = newCommitClient(uri, commit, cache, nil, nil, programmingLanguages)
@@ -447,7 +450,7 @@ func detectCommitState(
 			}
 		case impactPartial:
 			detectorStats.partial++
-			client, err = newCommitClient(uri, commit, cache, scope.paths, detector.include, programmingLanguages)
+			client, err = newCommitClient(uri, commit, cache, scope.paths, include, programmingLanguages)
 		}
 		if err != nil {
 			return commitState{}, err
@@ -473,6 +476,13 @@ func detectCommitState(
 		}
 	}
 	return current, nil
+}
+
+func includeForDetector(detector detector, cache *blobCache) func(string) bool {
+	if detector.name == checkFuzzing {
+		return cache.includeFuzzingPath
+	}
+	return detector.include
 }
 
 func emptyCommitState() commitState {

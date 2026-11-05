@@ -30,3 +30,17 @@ func TestFuzzingLanguageNameRejectsUnsupportedLanguage(t *testing.T) {
 		t.Fatalf("fuzzingLanguageName(Ruby) = %q, true", name)
 	}
 }
+
+func TestIncludeFuzzingPathUsesLanguagePathCache(t *testing.T) {
+	cache := &blobCache{languagePaths: make(map[string]languagePath)}
+	const path = "src/fuzz_test.go"
+	if !cache.includeFuzzingPath(path) {
+		t.Fatalf("includeFuzzingPath(%q) = false", path)
+	}
+	info := cache.languagePaths[path]
+	info.include = false
+	cache.languagePaths[path] = info
+	if cache.includeFuzzingPath(path) {
+		t.Fatalf("cached includeFuzzingPath(%q) = true", path)
+	}
+}
