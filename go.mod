@@ -1,6 +1,6 @@
 module github.com/git-pkgs/signals
 
-go 1.26.5
+go 1.27.3
 
 require (
 	github.com/git-pkgs/history v0.1.1
