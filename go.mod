@@ -4,7 +4,7 @@ go 1.27.3
 
 require (
 	github.com/git-pkgs/history v0.1.1
-	github.com/git-pkgs/languages v0.0.0-20261104135012-00c5692e3995
+	github.com/git-pkgs/languages v0.1.0
 	github.com/git-pkgs/roles v0.1.3
 	github.com/go-git/go-git/v6 v6.0.0-beta.1
 	github.com/ossf/scorecard/v5 v5.6.0

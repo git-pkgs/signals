@@ -238,8 +238,8 @@ github.com/felixge/httpsnoop v1.1.0 h1:3YtUj32ZZkqZtt3sZZsClsymw/QDuVfpNhoA31zeO
 github.com/felixge/httpsnoop v1.1.0/go.mod h1:Zqxgdd+1Rkcz8euOqdr7lqgCRJztwr5hp9vDSi5UZCE=
 github.com/git-pkgs/history v0.1.1 h1:WZZXMXSaZxU/JboXtiohfPvIv4RNZibPJuNw/BcWSFI=
 github.com/git-pkgs/history v0.1.1/go.mod h1:wZtYwhJsU5LJFLhrw9Lvx4Ue3ESp7+tv4an9KEeVBns=
-github.com/git-pkgs/languages v0.0.0-20261104135012-00c5692e3995 h1:lLTexzkby920yoq9XkO9u4zYJVwtFBxxIpAKqIVNA0Q=
-github.com/git-pkgs/languages v0.0.0-20261104135012-00c5692e3995/go.mod h1:1ySIOX1MKPvzd4HnByjzxfF2lMw6VY1M8ZjAfGwPDp0=
+github.com/git-pkgs/languages v0.1.0 h1:Y7bwb86k9DgagCJn3bXW6+8lOtwayDD17Np2usEPooY=
+github.com/git-pkgs/languages v0.1.0/go.mod h1:1ySIOX1MKPvzd4HnByjzxfF2lMw6VY1M8ZjAfGwPDp0=
 github.com/git-pkgs/magic v0.6.0 h1:fINPe67FEIaFRVlZzhOIDClMkm+gftBroBENa8bHSxQ=
 github.com/git-pkgs/magic v0.6.0/go.mod h1:SXOqcsNmbmpZjJZHEEWnwxprbsFvpwWgTAZrgXp4Jm4=
 github.com/git-pkgs/roles v0.1.3 h1:BkXoBFg0/4szCvBes8mD+UApRe1jITaZ/4bs+XtRxdw=
