@@ -144,6 +144,8 @@ func TestLogUsesLanguagesAndRolesForFuzzing(t *testing.T) {
 }
 
 func TestLogDetectsLocalToolingSecretsAndREUSEAcrossHistory(t *testing.T) {
+	const prefixBeyondCommonScanLimit = 64*1024 + 1
+
 	repo := t.TempDir()
 	gitRun(t, repo, "init", "-b", "main")
 	gitRun(t, repo, "config", "user.name", "Signals Test")
@@ -161,7 +163,8 @@ func TestLogDetectsLocalToolingSecretsAndREUSEAcrossHistory(t *testing.T) {
 	writeFile(t, repo, ".sops.yaml", "creation_rules: []\n")
 	writeFile(t, repo, "Makefile", "all:\n\t@true\n")
 	writeFile(t, repo, "config.yml", "token: "+token+"\n")
-	writeFile(t, repo, "licensed.txt", "SPDX-FileCopyrightText: 2026 Signals Test\nSPDX-License-Identifier: MIT\n")
+	writeFile(t, repo, "licensed.txt", strings.Repeat("x", prefixBeyondCommonScanLimit)+
+		"\nSPDX-FileCopyrightText: 2026 Signals Test\nSPDX-License-Identifier: MIT\n")
 	writeFile(t, repo, "main.c", "int main(void) { return 0; }\n")
 	gitRun(t, repo, "add", ".")
 	gitRun(t, repo, "commit", "-m", "Add local security evidence")

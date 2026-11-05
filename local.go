@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"path"
 	"sort"
@@ -412,12 +411,7 @@ func (d *localDetectors) scanSecretFile(
 	if signals, ok := d.secretCache[key]; ok {
 		return signals, nil
 	}
-	reader, err := cache.reader(file)
-	if err != nil {
-		return nil, err
-	}
-	data, readErr := io.ReadAll(reader)
-	err = errors.Join(readErr, reader.Close())
+	data, err := cache.dataFor(file)
 	if err != nil {
 		return nil, err
 	}
@@ -609,12 +603,7 @@ func reuseChangeMayActivate(changes []githistory.Change, cache *blobCache) (bool
 		if err != nil {
 			return false, err
 		}
-		reader, err := cache.reader(object.NewFile(change.Path, mode, blob))
-		if err != nil {
-			return false, err
-		}
-		data, readErr := io.ReadAll(reader)
-		err = errors.Join(readErr, reader.Close())
+		data, err := cache.dataFor(object.NewFile(change.Path, mode, blob))
 		if err != nil {
 			return false, err
 		}

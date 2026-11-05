@@ -35,11 +35,19 @@ func newBlobCache(repository *git.Repository) *blobCache {
 }
 
 func (c *blobCache) reader(file *object.File) (io.ReadCloser, error) {
+	data, err := c.dataFor(file)
+	if err != nil {
+		return nil, err
+	}
+	return io.NopCloser(bytes.NewReader(data)), nil
+}
+
+func (c *blobCache) dataFor(file *object.File) ([]byte, error) {
 	c.requests++
 	key := file.Hash.String()
 	if data, ok := c.data[key]; ok {
 		c.hits++
-		return io.NopCloser(bytes.NewReader(data)), nil
+		return data, nil
 	}
 	reader, err := file.Reader()
 	if err != nil {
@@ -52,7 +60,7 @@ func (c *blobCache) reader(file *object.File) (io.ReadCloser, error) {
 	}
 	c.data[key] = data
 	c.bytes += int64(len(data))
-	return io.NopCloser(bytes.NewReader(data)), nil
+	return data, nil
 }
 
 type commitClient struct {
