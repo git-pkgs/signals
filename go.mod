@@ -6,6 +6,7 @@ require (
 	github.com/git-pkgs/brief v0.15.0
 	github.com/git-pkgs/history v0.2.0
 	github.com/git-pkgs/languages v0.1.0
+	github.com/git-pkgs/mailmap v0.1.1
 	github.com/git-pkgs/reuse v0.2.0
 	github.com/git-pkgs/roles v0.1.3
 	github.com/git-pkgs/secrets v0.2.0
