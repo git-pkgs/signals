@@ -46,7 +46,7 @@ func runLog(args []string, stdout, stderr io.Writer) error {
 	workers := flags.Int("workers", 1, "concurrent history readers")
 	progress := flags.Int("progress", 0, "report progress every N commits")
 	stats := flags.Bool("stats", false, "report detector and blob-cache statistics")
-	jsonl := flags.Bool("jsonl", false, "write one JSON object per changed commit")
+	jsonl := flags.Bool("jsonl", false, "write JSON Lines change, event, and snapshot records")
 	snapshots := flags.Bool("snapshots", false, "emit signal snapshots at both date boundaries")
 	if err := flags.Parse(args); err != nil {
 		return err

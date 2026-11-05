@@ -39,7 +39,7 @@ Run `signals log` inside a Git repository, or pass another local repository as t
 ./signals log --workers 8 /path/to/repository
 ```
 
-Date bounds make it possible to inspect changes around an event such as grant funding. `--after` includes the named author date, while `--before` excludes it:
+Date bounds make it possible to inspect changes around an event such as grant funding. `--after` includes the named UTC committer date, while `--before` excludes it:
 
 ```bash
 ./signals log --workers 8 --jsonl --snapshots \
@@ -48,7 +48,7 @@ Date bounds make it possible to inspect changes around an event such as grant fu
   /path/to/repository > grant-window.jsonl
 ```
 
-The scan still computes signal state before the lower bound. A removal within the selected dates can therefore refer to a signal added before the funding date. With `--snapshots`, the first JSONL record contains the complete signal set at the last first-parent commit before `--after`; the final record does the same for `--before`.
+The scan still computes signal state before the lower bound. A removal within the selected dates can therefore refer to a signal added before the funding date. With `--snapshots`, the first JSONL record contains the complete signal set and 90-day commit metrics at the last first-parent commit before `--after`; the final record does the same for `--before`.
 
 Flags must appear before the repository path. The timeline is written to stdout, while progress, detector errors, and optional statistics are written to stderr:
 
@@ -68,34 +68,41 @@ The `log` command accepts these options. Run `signals log --help` to print the s
 --workers N      concurrent history readers (default 1)
 --progress N     report progress every N commits
 --stats          report detector and blob-cache statistics
---jsonl          write one JSON object per changed commit
+--jsonl          write JSON Lines change, event, and snapshot records
 --snapshots      emit signal snapshots at both date boundaries
 ```
 
 ## Output
 
-Each block names a commit where the detected state changed. A `+` line adds a signal, while a `-` line removes the previous one:
+Each block names a commit where the detected state changed or commit-local evidence was found. A `+` line adds a signal, a `-` line removes the previous one, and a `*` line records an event:
 
 ```text
 15dfa527561f  2016-12-18  Add support for Docker Compose development environment
   + Pinned-Dependencies/containerImage ruby at Dockerfile:1 = unpinned
 
 62308ad45a2d  2026-02-10  build(deps): Bump actions/checkout from 6.0.1 to 6.0.2
+  * Dependency-Update-Tool/commit Dependabot
+  * Signed-Commit/openpgp
   + Pinned-Dependencies/GitHubAction actions/checkout at .github/workflows/release.yml:20 = pinned@de0fac2e4500dabe0009e67214ff5f5447ce83dd
   - Pinned-Dependencies/GitHubAction actions/checkout at .github/workflows/release.yml:20 = pinned@8e8c483db84b4bee98b60c0593521ed34d9990e8
 ```
 
-Non-merge commits are compared with their first parent. Merge snapshots are scanned and cached so later commits inherit the right state, while merge commits produce no timeline block themselves.
+Non-merge commits are compared with their first parent. Merge snapshots are scanned and cached so later commits inherit the right state. Merge commits omit tree-state changes but can produce commit events.
 
 ### JSONL
 
-`--jsonl` writes one object per changed commit. Each object contains the full commit hash, author identity and timestamp, subject, and structured additions or removals:
+`--jsonl` writes structured change and event records. Each record contains the full commit hash, author and committer identities and timestamps, and subject:
 
 ```json
-{"type":"change","commit":"cb52a20b85fc2af8f7e6db0bc2cac843735eff49","author":{"name":"dependabot[bot]","email":"49699333+dependabot[bot]@users.noreply.github.com"},"authored_at":"2026-09-07T23:55:23Z","subject":"build(deps): Bump zizmorcore/zizmor-action from 0.6.2 to 0.6.3","changes":[{"change":"added","check":"Pinned-Dependencies","kind":"GitHubAction","name":"zizmorcore/zizmor-action","value":"pinned@70fb788f84895a7701f5643d103d587e460b5c99","path":".github/workflows/zizmor.yml","line":30},{"change":"removed","check":"Pinned-Dependencies","kind":"GitHubAction","name":"zizmorcore/zizmor-action","value":"pinned@3dc1ecc9bcb9e94e9b2c709687979e1298497054","path":".github/workflows/zizmor.yml","line":30}]}
+{"type":"change","commit":"cb52a20b85fc2af8f7e6db0bc2cac843735eff49","author":{"name":"dependabot[bot]","email":"49699333+dependabot[bot]@users.noreply.github.com"},"committer":{"name":"GitHub","email":"noreply@github.com"},"authored_at":"2026-09-07T23:55:23Z","committed_at":"2026-09-08T00:02:11Z","subject":"build(deps): Bump zizmorcore/zizmor-action from 0.6.2 to 0.6.3","changes":[{"change":"added","check":"Pinned-Dependencies","kind":"GitHubAction","name":"zizmorcore/zizmor-action","value":"pinned@70fb788f84895a7701f5643d103d587e460b5c99","path":".github/workflows/zizmor.yml","line":30},{"change":"removed","check":"Pinned-Dependencies","kind":"GitHubAction","name":"zizmorcore/zizmor-action","value":"pinned@3dc1ecc9bcb9e94e9b2c709687979e1298497054","path":".github/workflows/zizmor.yml","line":30}]}
+{"type":"event","commit":"cb52a20b85fc2af8f7e6db0bc2cac843735eff49","author":{"name":"dependabot[bot]","email":"49699333+dependabot[bot]@users.noreply.github.com"},"committer":{"name":"GitHub","email":"noreply@github.com"},"authored_at":"2026-09-07T23:55:23Z","committed_at":"2026-09-08T00:02:11Z","subject":"build(deps): Bump zizmorcore/zizmor-action from 0.6.2 to 0.6.3","events":[{"check":"Dependency-Update-Tool","kind":"commit","name":"Dependabot"},{"check":"Signed-Commit","kind":"openpgp"}]}
 ```
 
-Change records have `type` set to `change`. Boundary records use `type: snapshot`, identify the `start` or `end` boundary, and contain a `signals` array with the full detected state. Detector failures remain on stderr and also appear in an `errors` array when their state changes on an emitted commit. Every object occupies one physical line, including values containing escaped newlines.
+Change records have `type` set to `change`. Commit-local evidence uses `type: event` and an `events` array. Boundary records use `type: snapshot`, identify the `start` or `end` boundary, and contain the full detected state in `signals` plus commit-stream measurements in `metrics`. Ratios retain their numerator and denominator. `history_complete` is false for shallow or `--since` scans, and `mailmap_oid` identifies the `.mailmap` blob used to normalize contributor identities. Detector failures remain on stderr and also appear in an `errors` array when their state changes on an emitted commit. Every object occupies one physical line, including values containing escaped newlines.
+
+Commit events cover dependency updates authored by Dependabot, Renovate, Scala Steward, or Greenkeeper and the presence of OpenPGP, SSH, X.509, or unclassified commit signatures. Signature presence does not imply successful verification.
+
+Snapshot metrics use the preceding 90 days. They report non-bot contributor and email-domain counts, commit activity, review proxies, and signed-commit presence. Review proxies include pull-request merge and squash subjects, differing author and committer identities, and `Reviewed-by`, `Acked-by`, or `Tested-by` trailers. `Signed-off-by` remains separate because it records sign-off rather than review.
 
 ## Detected signals
 

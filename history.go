@@ -35,13 +35,15 @@ type signalChange struct {
 }
 
 type jsonlRecord struct {
-	Type       string        `json:"type"`
-	Commit     string        `json:"commit"`
-	Author     jsonlAuthor   `json:"author"`
-	AuthoredAt time.Time     `json:"authored_at"`
-	Subject    string        `json:"subject"`
-	Changes    []jsonlChange `json:"changes,omitempty"`
-	Errors     []errorChange `json:"errors,omitempty"`
+	Type        string        `json:"type"`
+	Commit      string        `json:"commit"`
+	Author      jsonlAuthor   `json:"author"`
+	Committer   jsonlAuthor   `json:"committer"`
+	AuthoredAt  time.Time     `json:"authored_at"`
+	CommittedAt time.Time     `json:"committed_at"`
+	Subject     string        `json:"subject"`
+	Changes     []jsonlChange `json:"changes,omitempty"`
+	Errors      []errorChange `json:"errors,omitempty"`
 }
 
 type jsonlAuthor struct {
@@ -69,22 +71,30 @@ type jsonlSignal struct {
 }
 
 type jsonlSnapshotRecord struct {
-	Type       string        `json:"type"`
-	Boundary   string        `json:"boundary"`
-	Date       string        `json:"date"`
-	Commit     string        `json:"commit,omitempty"`
-	Author     *jsonlAuthor  `json:"author,omitempty"`
-	AuthoredAt *time.Time    `json:"authored_at,omitempty"`
-	Subject    string        `json:"subject,omitempty"`
-	Signals    []jsonlSignal `json:"signals"`
-	Errors     []errorChange `json:"errors,omitempty"`
+	Type            string        `json:"type"`
+	Boundary        string        `json:"boundary"`
+	Date            string        `json:"date"`
+	Commit          string        `json:"commit,omitempty"`
+	Author          *jsonlAuthor  `json:"author,omitempty"`
+	Committer       *jsonlAuthor  `json:"committer,omitempty"`
+	AuthoredAt      *time.Time    `json:"authored_at,omitempty"`
+	CommittedAt     *time.Time    `json:"committed_at,omitempty"`
+	Subject         string        `json:"subject,omitempty"`
+	Signals         []jsonlSignal `json:"signals"`
+	Metrics         []jsonlMetric `json:"metrics"`
+	HistoryComplete bool          `json:"history_complete"`
+	MailmapOID      string        `json:"mailmap_oid,omitempty"`
+	Errors          []errorChange `json:"errors,omitempty"`
 }
 
 type boundarySnapshot struct {
-	boundary string
-	date     string
-	commit   *object.Commit
-	state    commitState
+	boundary        string
+	date            string
+	commit          *object.Commit
+	state           commitState
+	metrics         []jsonlMetric
+	historyComplete bool
+	mailmapOID      string
 }
 
 type commitState struct {
@@ -218,19 +228,9 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err err
 	if err != nil {
 		return err
 	}
-	var startSnapshot, endSnapshot boundarySnapshot
-	if opts.Snapshots {
-		startSnapshot, err = loadBoundarySnapshot(repo.Repository(), local, "file://"+uri, opts.Ref, "start", opts.After, cache, stats)
-		if err != nil {
-			return err
-		}
-		endSnapshot, err = loadBoundarySnapshot(repo.Repository(), local, "file://"+uri, opts.Ref, "end", opts.Before, cache, stats)
-		if err != nil {
-			return err
-		}
-		if err := writeBoundarySnapshot(stdout, startSnapshot, opts.JSONL); err != nil {
-			return err
-		}
+	snapshots, err := newSnapshotCollector(repo.Repository(), local, "file://"+uri, opts, cache, stats)
+	if err != nil {
+		return err
 	}
 	err = repo.WalkCommits(walk, func(commit githistory.Commit) error {
 		forceFull := len(commit.Object.ParentHashes) == 0
@@ -267,6 +267,10 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err err
 		if err != nil {
 			return err
 		}
+		if err := snapshots.beforeCommit(stdout, commit.Object, opts.JSONL); err != nil {
+			return err
+		}
+		snapshots.add(commit.Object)
 		if !parentHash.IsZero() {
 			states.release(parentHash)
 		}
@@ -277,46 +281,24 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err err
 				return err
 			}
 		}
-		if len(commit.Object.ParentHashes) > 1 {
-			return nil
-		}
-		if !dateInRange(commit.Object.Author.When, opts.After, opts.Before) {
+		if !dateInRange(commit.Object.Committer.When, opts.After, opts.Before) {
 			return nil
 		}
 
-		changes := diffSignals(parent.signals, current.signals)
-		errorChanges := diffErrors(parent.errors, current.errors)
-		if len(changes) > 0 || len(errorChanges) > 0 {
-			if opts.JSONL {
-				if err := writeJSONLRecord(stdout, commit.Object, changes, errorChanges); err != nil {
-					return err
-				}
-			} else {
-				if _, err := fmt.Fprintf(stdout, "%s  %s  %s\n",
-					commit.Object.Hash.String()[:12],
-					commit.Object.Author.When.Format(time.DateOnly),
-					githistory.CommitSubject(commit.Object.Message),
-				); err != nil {
-					return err
-				}
-				for _, change := range changes {
-					if _, err := fmt.Fprintf(stdout, "  %c %s\n", change.Marker, formatSignal(change.Signal)); err != nil {
-						return err
-					}
-				}
-			}
-			for _, change := range errorChanges {
-				if _, err := fmt.Fprintf(stderr, "%s  %s: %s\n", commit.Object.Hash.String()[:12], change.Check, change.Message); err != nil {
-					return err
-				}
-			}
+		var changes []signalChange
+		var errorChanges []errorChange
+		if len(commit.Object.ParentHashes) <= 1 {
+			changes = diffSignals(parent.signals, current.signals)
+			errorChanges = diffErrors(parent.errors, current.errors)
+		}
+		events := commitEvents(commit.Object)
+		if err := writeCommitRecords(stdout, stderr, commit.Object, changes, errorChanges, events, opts.JSONL); err != nil {
+			return err
 		}
 		return nil
 	})
-	if err == nil && opts.Snapshots {
-		if writeErr := writeBoundarySnapshot(stdout, endSnapshot, opts.JSONL); writeErr != nil {
-			err = writeErr
-		}
+	if err == nil {
+		err = snapshots.finish(stdout, opts.JSONL)
 	}
 	if opts.Stats {
 		err = errors.Join(err, printStats(stderr, stats))
@@ -352,6 +334,10 @@ func loadBoundarySnapshot(
 }
 
 func findFirstParentBefore(repo *git.Repository, ref, before string) (*object.Commit, error) {
+	boundary, err := time.Parse(time.DateOnly, before)
+	if err != nil {
+		return nil, err
+	}
 	hash, err := repo.ResolveRevision(plumbing.Revision(ref))
 	if err != nil {
 		return nil, err
@@ -362,8 +348,8 @@ func findFirstParentBefore(repo *git.Repository, ref, before string) (*object.Co
 	}
 	var candidate *object.Commit
 	for {
-		if commit.Author.When.Format(time.DateOnly) < before &&
-			(candidate == nil || commit.Author.When.After(candidate.Author.When)) {
+		if commit.Committer.When.Before(boundary) &&
+			(candidate == nil || commit.Committer.When.After(candidate.Committer.When)) {
 			candidate = commit
 		}
 		if len(commit.ParentHashes) == 0 {
@@ -386,18 +372,25 @@ func writeBoundarySnapshot(writer io.Writer, snapshot boundarySnapshot, jsonl bo
 
 	if jsonl {
 		record := jsonlSnapshotRecord{
-			Type:     "snapshot",
-			Boundary: snapshot.boundary,
-			Date:     snapshot.date,
-			Signals:  make([]jsonlSignal, 0, len(signals)),
-			Errors:   errors,
+			Type:            "snapshot",
+			Boundary:        snapshot.boundary,
+			Date:            snapshot.date,
+			Signals:         make([]jsonlSignal, 0, len(signals)),
+			Metrics:         snapshot.metrics,
+			HistoryComplete: snapshot.historyComplete,
+			MailmapOID:      snapshot.mailmapOID,
+			Errors:          errors,
 		}
 		if snapshot.commit != nil {
 			author := jsonlAuthor{Name: snapshot.commit.Author.Name, Email: snapshot.commit.Author.Email}
+			committer := jsonlAuthor{Name: snapshot.commit.Committer.Name, Email: snapshot.commit.Committer.Email}
 			authoredAt := snapshot.commit.Author.When
+			committedAt := snapshot.commit.Committer.When
 			record.Commit = snapshot.commit.Hash.String()
 			record.Author = &author
+			record.Committer = &committer
 			record.AuthoredAt = &authoredAt
+			record.CommittedAt = &committedAt
 			record.Subject = githistory.CommitSubject(snapshot.commit.Message)
 		}
 		for _, signal := range signals {
@@ -407,20 +400,32 @@ func writeBoundarySnapshot(writer io.Writer, snapshot boundarySnapshot, jsonl bo
 	}
 
 	if snapshot.commit == nil {
-		_, err := fmt.Fprintf(writer, "snapshot %s %s  before repository history\n", snapshot.boundary, snapshot.date)
-		return err
+		if _, err := fmt.Fprintf(writer, "snapshot %s %s  before repository history\n", snapshot.boundary, snapshot.date); err != nil {
+			return err
+		}
+		for _, metric := range snapshot.metrics {
+			if _, err := fmt.Fprintf(writer, "  # %s\n", formatMetric(metric)); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 	if _, err := fmt.Fprintf(writer, "snapshot %s %s  %s  %s  %s\n",
 		snapshot.boundary,
 		snapshot.date,
 		snapshot.commit.Hash.String()[:12],
-		snapshot.commit.Author.When.Format(time.DateOnly),
+		snapshot.commit.Committer.When.Format(time.DateOnly),
 		githistory.CommitSubject(snapshot.commit.Message),
 	); err != nil {
 		return err
 	}
 	for _, signal := range signals {
 		if _, err := fmt.Fprintf(writer, "  = %s\n", formatSignal(signal)); err != nil {
+			return err
+		}
+	}
+	for _, metric := range snapshot.metrics {
+		if _, err := fmt.Fprintf(writer, "  # %s\n", formatMetric(metric)); err != nil {
 			return err
 		}
 	}
@@ -433,19 +438,81 @@ func writeBoundarySnapshot(writer io.Writer, snapshot boundarySnapshot, jsonl bo
 }
 
 func dateInRange(date time.Time, after, before string) bool {
-	value := date.Format(time.DateOnly)
-	return (after == "" || value >= after) && (before == "" || value < before)
+	if after != "" {
+		boundary, _ := time.Parse(time.DateOnly, after)
+		if date.Before(boundary) {
+			return false
+		}
+	}
+	if before != "" {
+		boundary, _ := time.Parse(time.DateOnly, before)
+		if !date.Before(boundary) {
+			return false
+		}
+	}
+	return true
+}
+
+func writeCommitRecords(
+	stdout, stderr io.Writer,
+	commit *object.Commit,
+	changes []signalChange,
+	errorChanges []errorChange,
+	events []jsonlSignal,
+	jsonl bool,
+) error {
+	if len(changes) == 0 && len(errorChanges) == 0 && len(events) == 0 {
+		return nil
+	}
+	if jsonl {
+		if len(changes) > 0 || len(errorChanges) > 0 {
+			if err := writeJSONLRecord(stdout, commit, changes, errorChanges); err != nil {
+				return err
+			}
+		}
+		if len(events) > 0 {
+			if err := writeJSONLEventRecord(stdout, commit, events); err != nil {
+				return err
+			}
+		}
+	} else {
+		if _, err := fmt.Fprintf(stdout, "%s  %s  %s\n",
+			commit.Hash.String()[:12],
+			commit.Committer.When.Format(time.DateOnly),
+			githistory.CommitSubject(commit.Message),
+		); err != nil {
+			return err
+		}
+		for _, change := range changes {
+			if _, err := fmt.Fprintf(stdout, "  %c %s\n", change.Marker, formatSignal(change.Signal)); err != nil {
+				return err
+			}
+		}
+		for _, event := range events {
+			if _, err := fmt.Fprintf(stdout, "  * %s\n", formatSignal(Signal(event))); err != nil {
+				return err
+			}
+		}
+	}
+	for _, change := range errorChanges {
+		if _, err := fmt.Fprintf(stderr, "%s  %s: %s\n", commit.Hash.String()[:12], change.Check, change.Message); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func writeJSONLRecord(writer io.Writer, commit *object.Commit, changes []signalChange, errors []errorChange) error {
 	record := jsonlRecord{
-		Type:       "change",
-		Commit:     commit.Hash.String(),
-		Author:     jsonlAuthor{Name: commit.Author.Name, Email: commit.Author.Email},
-		AuthoredAt: commit.Author.When,
-		Subject:    githistory.CommitSubject(commit.Message),
-		Changes:    make([]jsonlChange, 0, len(changes)),
-		Errors:     errors,
+		Type:        "change",
+		Commit:      commit.Hash.String(),
+		Author:      jsonlAuthor{Name: commit.Author.Name, Email: commit.Author.Email},
+		Committer:   jsonlAuthor{Name: commit.Committer.Name, Email: commit.Committer.Email},
+		AuthoredAt:  commit.Author.When,
+		CommittedAt: commit.Committer.When,
+		Subject:     githistory.CommitSubject(commit.Message),
+		Changes:     make([]jsonlChange, 0, len(changes)),
+		Errors:      errors,
 	}
 	for _, change := range changes {
 		record.Changes = append(record.Changes, jsonlChange{

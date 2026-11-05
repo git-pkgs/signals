@@ -578,7 +578,7 @@ func TestLogWritesBoundarySnapshots(t *testing.T) {
 	}
 }
 
-func TestLogFiltersOutputByAuthorDateWithoutDiscardingEarlierState(t *testing.T) {
+func TestLogFiltersOutputByCommitterDateWithoutDiscardingEarlierState(t *testing.T) {
 	repo := t.TempDir()
 	gitRun(t, repo, "init", "-b", "main")
 	gitRun(t, repo, "config", "user.name", "Signals Test")
@@ -597,11 +597,17 @@ func TestLogFiltersOutputByAuthorDateWithoutDiscardingEarlierState(t *testing.T)
 		t.Fatal(err)
 	}
 	gitRun(t, repo, "add", "-u")
-	gitRunAt(t, repo, "2024-02-01T12:00:00Z", "commit", "-m", "Remove policy after funding")
+	gitRunWithDates(
+		t, repo, "2024-01-20T12:00:00Z", "2024-02-01T12:00:00Z",
+		"commit", "-m", "Remove policy after funding",
+	)
 
 	writeFile(t, repo, "SECURITY.md", "Report vulnerabilities to security@example.com.\n")
 	gitRun(t, repo, "add", ".")
-	gitRunAt(t, repo, "2024-03-01T12:00:00Z", "commit", "-m", "Restore policy at upper bound")
+	gitRunWithDates(
+		t, repo, "2024-02-15T12:00:00Z", "2024-03-01T12:00:00Z",
+		"commit", "-m", "Restore policy at upper bound",
+	)
 
 	var stdout, stderr bytes.Buffer
 	if err := run([]string{
@@ -780,6 +786,37 @@ func gitRunAt(t *testing.T, dir, date string, args ...string) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GIT_AUTHOR_DATE="+date, "GIT_COMMITTER_DATE="+date)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, output)
+	}
+}
+
+func gitRunWithDates(t *testing.T, dir, authorDate, committerDate string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GIT_AUTHOR_DATE="+authorDate, "GIT_COMMITTER_DATE="+committerDate)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, output)
+	}
+}
+
+func gitRunAtAs(
+	t *testing.T,
+	dir, date, authorName, authorEmail, committerName, committerEmail string,
+	args ...string,
+) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_DATE="+date,
+		"GIT_COMMITTER_DATE="+date,
+		"GIT_AUTHOR_NAME="+authorName,
+		"GIT_AUTHOR_EMAIL="+authorEmail,
+		"GIT_COMMITTER_NAME="+committerName,
+		"GIT_COMMITTER_EMAIL="+committerEmail,
+	)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, output)
 	}
