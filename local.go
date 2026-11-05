@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"path"
 	"sort"
@@ -33,6 +34,9 @@ const (
 	checkSecurityTool      = "Security-Tool"
 
 	detectorBrief = "Brief"
+
+	maxSecretBlobSize   = 1 << 20
+	reuseMarkerReadSize = 32 * 1024
 )
 
 var localDetectorNames = []string{detectorBrief, checkSecret, checkREUSE}
@@ -49,6 +53,7 @@ type localDetectors struct {
 	briefImpact   *gitbrief.Report
 	secretScanner *scanner.Scanner
 	secretCache   map[secretCacheKey][]Signal
+	reuseMarkers  map[plumbing.Hash]bool
 }
 
 type secretCacheKey struct {
@@ -77,6 +82,7 @@ func newLocalDetectors(ctx context.Context, repo *githistory.Repo) (*localDetect
 		knowledge:     knowledge,
 		secretScanner: secretScanner,
 		secretCache:   make(map[secretCacheKey][]Signal),
+		reuseMarkers:  make(map[plumbing.Hash]bool),
 	}
 	detectors.briefImpact = newBriefImpactReport(knowledge)
 	return detectors, nil
@@ -115,7 +121,6 @@ func (d *localDetectors) detect(
 	changes []githistory.Change,
 	forceFull bool,
 	languagesChanged bool,
-	cache *blobCache,
 	stats *scanStats,
 ) (commitState, error) {
 	current := cloneCommitState(parent)
@@ -125,7 +130,7 @@ func (d *localDetectors) detect(
 	reuseFull := forceFull || parent.errors[checkREUSE] != "" || reuseMetadataChanged(changes)
 	if !reuseFull && !parent.reuseActive {
 		var err error
-		reuseFull, err = reuseChangeMayActivate(changes, cache)
+		reuseFull, err = d.reuseChangeMayActivate(changes)
 		if err != nil {
 			return commitState{}, err
 		}
@@ -142,7 +147,7 @@ func (d *localDetectors) detect(
 	}
 
 	d.runBrief(tree, briefRun, briefFull, &current, stats)
-	d.runSecrets(ctx, commit, changes, secretFull, cache, &current, stats)
+	d.runSecrets(ctx, commit, changes, secretFull, &current, stats)
 	d.runREUSE(tree, changes, reuseRun, reuseFull, &current, stats)
 	return current, nil
 }
@@ -310,7 +315,6 @@ func (d *localDetectors) runSecrets(
 	commit *object.Commit,
 	changes []githistory.Change,
 	forceFull bool,
-	cache *blobCache,
 	current *commitState,
 	stats *scanStats,
 ) {
@@ -321,7 +325,7 @@ func (d *localDetectors) runSecrets(
 	}
 	recordDetectorRun(detectorStats, forceFull)
 	started := time.Now()
-	signals, paths, err := d.secretSignals(ctx, commit, changes, forceFull, cache)
+	signals, paths, err := d.secretSignals(ctx, commit, changes, forceFull)
 	detectorStats.duration += time.Since(started)
 	if err != nil {
 		current.errors[checkSecret] = err.Error()
@@ -341,7 +345,6 @@ func (d *localDetectors) secretSignals(
 	commit *object.Commit,
 	changes []githistory.Change,
 	forceFull bool,
-	cache *blobCache,
 ) ([]Signal, map[string]bool, error) {
 	paths := make(map[string]bool)
 	var signals []Signal
@@ -356,7 +359,7 @@ func (d *localDetectors) secretSignals(
 			if !secretFileMode(file.Mode) {
 				return nil
 			}
-			found, err := d.scanSecretFile(ctx, file, cache)
+			found, err := d.scanSecretFile(ctx, file)
 			if err != nil {
 				return fmt.Errorf("scan %s for secrets: %w", file.Name, err)
 			}
@@ -389,7 +392,7 @@ func (d *localDetectors) secretSignals(
 		if err != nil {
 			return nil, nil, err
 		}
-		found, err := d.scanSecretFile(ctx, file, cache)
+		found, err := d.scanSecretFile(ctx, file)
 		if err != nil {
 			return nil, nil, fmt.Errorf("scan %s for secrets: %w", change.Path, err)
 		}
@@ -405,13 +408,16 @@ func secretFileMode(mode filemode.FileMode) bool {
 func (d *localDetectors) scanSecretFile(
 	ctx context.Context,
 	file *object.File,
-	cache *blobCache,
 ) ([]Signal, error) {
 	key := secretCacheKey{oid: file.Hash.String(), path: file.Name}
 	if signals, ok := d.secretCache[key]; ok {
 		return signals, nil
 	}
-	data, err := cache.dataFor(file)
+	if file.Size > maxSecretBlobSize {
+		d.secretCache[key] = nil
+		return nil, nil
+	}
+	data, err := readBlob(file)
 	if err != nil {
 		return nil, err
 	}
@@ -437,6 +443,15 @@ func (d *localDetectors) scanSecretFile(
 	signals = deduplicateSignals(signals)
 	d.secretCache[key] = signals
 	return signals, nil
+}
+
+func readBlob(file *object.File) ([]byte, error) {
+	reader, err := file.Reader()
+	if err != nil {
+		return nil, err
+	}
+	data, readErr := io.ReadAll(reader)
+	return data, errors.Join(readErr, reader.Close())
 }
 
 func (d *localDetectors) runREUSE(
@@ -586,7 +601,7 @@ func reuseMetadataChanged(changes []githistory.Change) bool {
 	return false
 }
 
-func reuseChangeMayActivate(changes []githistory.Change, cache *blobCache) (bool, error) {
+func (d *localDetectors) reuseChangeMayActivate(changes []githistory.Change) (bool, error) {
 	for _, change := range changes {
 		mode, err := filemode.New(change.NewMode)
 		if err != nil {
@@ -599,21 +614,68 @@ func reuseChangeMayActivate(changes []githistory.Change, cache *blobCache) (bool
 		if !ok {
 			return false, fmt.Errorf("parse object ID for %s", change.Path)
 		}
-		blob, err := cache.repository.BlobObject(hash)
-		if err != nil {
-			return false, err
-		}
-		data, err := cache.dataFor(object.NewFile(change.Path, mode, blob))
-		if err != nil {
-			return false, err
-		}
-		for _, marker := range reuseMetadataMarkers {
-			if bytes.Contains(data, marker) {
-				return true, nil
+		matched, cached := d.reuseMarkers[hash]
+		if !cached {
+			blob, err := d.repo.Repository().BlobObject(hash)
+			if err != nil {
+				return false, err
 			}
+			matched, err = blobContainsAny(blob, reuseMetadataMarkers[:])
+			if err != nil {
+				return false, err
+			}
+			d.reuseMarkers[hash] = matched
+		}
+		if matched {
+			return true, nil
 		}
 	}
 	return false, nil
+}
+
+func blobContainsAny(blob *object.Blob, markers [][]byte) (bool, error) {
+	reader, err := blob.Reader()
+	if err != nil {
+		return false, err
+	}
+	matched, readErr := readerContainsAny(reader, markers)
+	return matched, errors.Join(readErr, reader.Close())
+}
+
+func readerContainsAny(reader io.Reader, markers [][]byte) (bool, error) {
+	maxMarkerSize := 0
+	for _, marker := range markers {
+		maxMarkerSize = max(maxMarkerSize, len(marker))
+	}
+	if maxMarkerSize == 0 {
+		return false, nil
+	}
+
+	overlapSize := maxMarkerSize - 1
+	buffer := make([]byte, reuseMarkerReadSize+overlapSize)
+	retained := 0
+	for {
+		read, err := reader.Read(buffer[retained : retained+reuseMarkerReadSize])
+		chunk := buffer[:retained+read]
+		matched := false
+		for _, marker := range markers {
+			if bytes.Contains(chunk, marker) {
+				matched = true
+				break
+			}
+		}
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return matched, nil
+			}
+			return false, err
+		}
+		if matched {
+			return true, nil
+		}
+		retained = min(overlapSize, len(chunk))
+		copy(buffer[:retained], chunk[len(chunk)-retained:])
+	}
 }
 
 func recordDetectorRun(stats *detectorStats, full bool) {

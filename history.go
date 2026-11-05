@@ -492,7 +492,7 @@ func detectCommitState(
 			current.signals[signalKey(signal)] = signal
 		}
 	}
-	return local.detect(context.Background(), commit, current, changes, forceFull, languagesChanged, cache, stats)
+	return local.detect(context.Background(), commit, current, changes, forceFull, languagesChanged, stats)
 }
 
 func includeForDetector(detector detector, cache *blobCache) func(string) bool {

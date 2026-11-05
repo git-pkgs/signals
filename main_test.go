@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	githistory "github.com/git-pkgs/history"
 )
 
 func TestLogDetectsSignalChangesAcrossHistory(t *testing.T) {
@@ -228,6 +230,80 @@ func TestLogDetectsLocalToolingSecretsAndREUSEAcrossHistory(t *testing.T) {
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("unexpected detection errors:\n%s", stderr.String())
+	}
+}
+
+func TestLocalDetectorsDoNotRetainBlobContents(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.name", "Signals Test")
+	gitRun(t, repo, "config", "user.email", "signals@example.com")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+
+	const token = "ghp_" + "16C7e42F292c6912E7710c838347Ae178B4a"
+	writeFile(t, repo, "oversized.data", token+"\n"+strings.Repeat("x", maxSecretBlobSize))
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Add oversized blob")
+
+	for i := range 6 {
+		writeFile(t, repo, fmt.Sprintf("history/%02d.data", i), fmt.Sprintf("revision %d\n", i))
+		gitRun(t, repo, "add", ".")
+		gitRun(t, repo, "commit", "-m", fmt.Sprintf("Add history blob %d", i))
+	}
+
+	historyRepo, err := githistory.Open(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := historyRepo.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	local, err := newLocalDetectors(t.Context(), historyRepo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := local.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	cache := newBlobCache(historyRepo.Repository())
+	stats := newScanStats(cache)
+	state := emptyCommitState()
+	first := true
+	err = historyRepo.WalkCommits(githistory.CommitOptions{Workers: 1, Merges: true}, func(commit githistory.Commit) error {
+		current, err := local.detect(t.Context(), commit.Object, state, commit.Changes, first, false, stats)
+		if err != nil {
+			return err
+		}
+		state = current
+		first = false
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cache.data) != 0 {
+		t.Fatalf("local detectors retained %d blob contents", len(cache.data))
+	}
+	for _, signal := range state.signals {
+		if signal.Check == checkSecret {
+			t.Fatalf("oversized blob produced a secret signal: %#v", signal)
+		}
+	}
+}
+
+func TestReaderContainsAnyAcrossChunks(t *testing.T) {
+	marker := reuseMetadataMarkers[0]
+	prefix := strings.Repeat("x", reuseMarkerReadSize-len(marker)/2)
+	matched, err := readerContainsAny(strings.NewReader(prefix+string(marker)), reuseMetadataMarkers[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !matched {
+		t.Fatal("marker spanning read chunks was not detected")
 	}
 }
 
