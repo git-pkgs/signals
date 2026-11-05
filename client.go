@@ -10,19 +10,28 @@ import (
 	"sync"
 	"time"
 
+	git "github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing/object"
 	"github.com/ossf/scorecard/v5/clients"
 )
 
 type blobCache struct {
-	data     map[string][]byte
-	requests int
-	hits     int
-	bytes    int64
+	repository    *git.Repository
+	data          map[string][]byte
+	languageBlobs map[string]languageBlob
+	languagePaths map[string]languagePath
+	requests      int
+	hits          int
+	bytes         int64
 }
 
-func newBlobCache() *blobCache {
-	return &blobCache{data: make(map[string][]byte)}
+func newBlobCache(repository *git.Repository) *blobCache {
+	return &blobCache{
+		repository:    repository,
+		data:          make(map[string][]byte),
+		languageBlobs: make(map[string]languageBlob),
+		languagePaths: make(map[string]languagePath),
+	}
 }
 
 func (c *blobCache) reader(file *object.File) (io.ReadCloser, error) {
@@ -47,29 +56,40 @@ func (c *blobCache) reader(file *object.File) (io.ReadCloser, error) {
 }
 
 type commitClient struct {
-	uri      string
-	tree     *object.Tree
-	cache    *blobCache
-	allowed  map[string]bool
-	once     sync.Once
-	files    []string
-	objects  map[string]*object.File
-	filesErr error
+	uri                  string
+	tree                 *object.Tree
+	cache                *blobCache
+	allowed              map[string]bool
+	include              func(string) bool
+	programmingLanguages []clients.Language
+	once                 sync.Once
+	files                []string
+	objects              map[string]*object.File
+	filesErr             error
 }
 
 var _ clients.RepoClient = (*commitClient)(nil)
 
-func newCommitClient(uri string, commit *object.Commit, cache *blobCache, allowed map[string]bool) (*commitClient, error) {
+func newCommitClient(
+	uri string,
+	commit *object.Commit,
+	cache *blobCache,
+	allowed map[string]bool,
+	include func(string) bool,
+	programmingLanguages []clients.Language,
+) (*commitClient, error) {
 	tree, err := commit.Tree()
 	if err != nil {
 		return nil, fmt.Errorf("read commit tree: %w", err)
 	}
 	return &commitClient{
-		uri:     uri,
-		tree:    tree,
-		cache:   cache,
-		allowed: allowed,
-		objects: make(map[string]*object.File),
+		uri:                  uri,
+		tree:                 tree,
+		cache:                cache,
+		allowed:              allowed,
+		include:              include,
+		programmingLanguages: programmingLanguages,
+		objects:              make(map[string]*object.File),
 	}, nil
 }
 
@@ -120,6 +140,9 @@ func (c *commitClient) loadFiles() {
 	iter := c.tree.Files()
 	defer iter.Close()
 	c.filesErr = iter.ForEach(func(file *object.File) error {
+		if c.include != nil && !c.include(file.Name) {
+			return nil
+		}
 		c.files = append(c.files, file.Name)
 		c.objects[file.Name] = file
 		return nil
@@ -134,6 +157,9 @@ func (c *commitClient) loadAllowedFiles() {
 	}
 	sort.Strings(paths)
 	for _, path := range paths {
+		if c.include != nil && !c.include(path) {
+			continue
+		}
 		file, err := c.tree.File(path)
 		if errors.Is(err, object.ErrFileNotFound) {
 			continue
@@ -204,7 +230,7 @@ func (c *commitClient) ListWebhooks() ([]clients.Webhook, error) {
 }
 
 func (c *commitClient) ListProgrammingLanguages() ([]clients.Language, error) {
-	return []clients.Language{{Name: clients.All, NumLines: 1}}, nil
+	return append([]clients.Language(nil), c.programmingLanguages...), nil
 }
 
 func (c *commitClient) Search(clients.SearchRequest) (clients.SearchResponse, error) {

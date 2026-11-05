@@ -43,9 +43,10 @@ const (
 )
 
 type detector struct {
-	name   string
-	impact func(string) detectionImpact
-	run    func(*checker.CheckRequest) ([]Signal, error)
+	name    string
+	impact  func(string) detectionImpact
+	include func(string) bool
+	run     func(*checker.CheckRequest) ([]Signal, error)
 }
 
 type detectionScope struct {
@@ -57,7 +58,7 @@ var scorecardDetectors = []detector{
 	{name: checkBinaryArtifacts, impact: impactAnyPartial, run: detectBinaryArtifacts},
 	{name: checkDangerousWorkflow, impact: impactWorkflow, run: detectDangerousWorkflows},
 	{name: checkDependencyUpdateTool, impact: impactDependencyUpdate, run: detectDependencyUpdateTools},
-	{name: checkFuzzing, impact: impactFuzzing, run: detectFuzzing},
+	{name: checkFuzzing, impact: impactFuzzing, include: includeFuzzingPath, run: detectFuzzing},
 	{name: checkLicense, impact: impactLicense, run: detectLicenses},
 	{name: checkPinnedDependencies, impact: impactPinnedDependencies, run: detectPinnedDependencies},
 	{name: checkSAST, impact: impactSAST, run: detectSAST},

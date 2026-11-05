@@ -88,8 +88,9 @@ type boundarySnapshot struct {
 }
 
 type commitState struct {
-	signals map[string]Signal
-	errors  map[string]string
+	signals   map[string]Signal
+	errors    map[string]string
+	languages languageInventory
 }
 
 type detectorStats struct {
@@ -103,6 +104,7 @@ type detectorStats struct {
 type scanStats struct {
 	started   time.Time
 	commits   int
+	languages time.Duration
 	detectors map[string]*detectorStats
 	cache     *blobCache
 }
@@ -132,7 +134,7 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err err
 	if err != nil {
 		return err
 	}
-	cache := newBlobCache()
+	cache := newBlobCache(repo.Repository())
 	stats := newScanStats(cache)
 	states := make(map[string]commitState)
 	var startSnapshot, endSnapshot boundarySnapshot
@@ -155,6 +157,7 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err err
 		Merges:  true,
 		Workers: opts.Workers,
 	}, func(commit githistory.Commit) error {
+		forceFull := len(commit.Object.ParentHashes) == 0
 		parent := emptyCommitState()
 		if len(commit.Object.ParentHashes) > 0 {
 			parentHash := commit.Object.ParentHashes[0]
@@ -170,6 +173,7 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err err
 					return err
 				}
 				states[parentHash.String()] = parent
+				forceFull = true
 			}
 		}
 
@@ -178,7 +182,7 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err err
 			commit.Object,
 			parent,
 			commit.Changes,
-			len(commit.Object.ParentHashes) == 0,
+			forceFull,
 			cache,
 			stats,
 		)
@@ -405,12 +409,23 @@ func detectCommitState(
 	stats *scanStats,
 ) (commitState, error) {
 	current := cloneCommitState(parent)
+	languageStarted := time.Now()
+	languages, err := languageInventoryForCommit(parent.languages, commit, changes, forceFull, cache)
+	stats.languages += time.Since(languageStarted)
+	if err != nil {
+		return commitState{}, err
+	}
+	current.languages = languages
+	programmingLanguages := current.languages.scorecard()
 	paths := changedPaths(changes)
 	var fullClient *commitClient
 
 	for _, detector := range scorecardDetectors {
 		detectorStats := stats.detectors[detector.name]
 		scope := detector.scope(paths, forceFull)
+		if detector.name == checkFuzzing && !parent.languages.sameLanguages(current.languages) {
+			scope = detectionScope{impact: impactFull}
+		}
 		if _, failed := parent.errors[detector.name]; failed && scope.impact != impactNone {
 			scope = detectionScope{impact: impactFull}
 		}
@@ -421,16 +436,21 @@ func detectCommitState(
 
 		var client *commitClient
 		var err error
+		include := includeForDetector(detector, cache)
 		switch scope.impact {
 		case impactFull:
 			detectorStats.full++
-			if fullClient == nil {
-				fullClient, err = newCommitClient(uri, commit, cache, nil)
+			if include != nil {
+				client, err = newCommitClient(uri, commit, cache, nil, include, programmingLanguages)
+			} else {
+				if fullClient == nil {
+					fullClient, err = newCommitClient(uri, commit, cache, nil, nil, programmingLanguages)
+				}
+				client = fullClient
 			}
-			client = fullClient
 		case impactPartial:
 			detectorStats.partial++
-			client, err = newCommitClient(uri, commit, cache, scope.paths)
+			client, err = newCommitClient(uri, commit, cache, scope.paths, include, programmingLanguages)
 		}
 		if err != nil {
 			return commitState{}, err
@@ -458,17 +478,26 @@ func detectCommitState(
 	return current, nil
 }
 
+func includeForDetector(detector detector, cache *blobCache) func(string) bool {
+	if detector.name == checkFuzzing {
+		return cache.includeFuzzingPath
+	}
+	return detector.include
+}
+
 func emptyCommitState() commitState {
 	return commitState{
-		signals: make(map[string]Signal),
-		errors:  make(map[string]string),
+		signals:   make(map[string]Signal),
+		errors:    make(map[string]string),
+		languages: make(languageInventory),
 	}
 }
 
 func cloneCommitState(state commitState) commitState {
 	clone := commitState{
-		signals: make(map[string]Signal, len(state.signals)),
-		errors:  make(map[string]string, len(state.errors)),
+		signals:   make(map[string]Signal, len(state.signals)),
+		errors:    make(map[string]string, len(state.errors)),
+		languages: state.languages,
 	}
 	for key, signal := range state.signals {
 		clone.signals[key] = signal
@@ -509,6 +538,13 @@ func printStats(writer io.Writer, stats *scanStats) error {
 	}
 	if _, err := fmt.Fprintf(writer, "signals: blobs %d unique, %d reads, %d cache hits, %d bytes\n",
 		len(stats.cache.data), stats.cache.requests, stats.cache.hits, stats.cache.bytes); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(writer, "signals: Languages paths=%d analyzed=%d time=%s\n",
+		len(stats.cache.languagePaths),
+		len(stats.cache.languageBlobs),
+		stats.languages.Round(time.Millisecond),
+	); err != nil {
 		return err
 	}
 	for _, detector := range scorecardDetectors {
