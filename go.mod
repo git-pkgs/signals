@@ -3,12 +3,12 @@ module github.com/git-pkgs/signals
 go 1.27.3
 
 require (
-	github.com/git-pkgs/brief v0.14.3-0.20261104234518-cf98cc1b8eec
-	github.com/git-pkgs/history v0.1.2-0.20261104234502-a682b9bc974d
+	github.com/git-pkgs/brief v0.15.0
+	github.com/git-pkgs/history v0.2.0
 	github.com/git-pkgs/languages v0.1.0
-	github.com/git-pkgs/reuse v0.1.2-0.20261104160354-13fc254540bb
+	github.com/git-pkgs/reuse v0.2.0
 	github.com/git-pkgs/roles v0.1.3
-	github.com/git-pkgs/secrets v0.1.1-0.20261104170834-437f2fb88620
+	github.com/git-pkgs/secrets v0.2.0
 	github.com/go-git/go-git/v6 v6.0.0-beta.1
 	github.com/ossf/scorecard/v5 v5.6.0
 )
