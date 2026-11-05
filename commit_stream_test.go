@@ -123,6 +123,81 @@ func TestLogSnapshotsIncludeCommitMetrics(t *testing.T) {
 	assertDaysMetric(t, snapshots[1].Metrics, "days-since-commit", 41)
 }
 
+func TestLogSnapshotMetricsSortNonMonotonicCommitterDates(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.name", "Signals Test")
+	gitRun(t, repo, "config", "user.email", "signals@example.com")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+
+	writeFile(t, repo, "README.md", "# example\n")
+	gitRun(t, repo, "add", ".")
+	gitRunAt(t, repo, "2024-01-01T00:00:00Z", "commit", "-m", "Initial commit")
+
+	writeFile(t, repo, "parent.txt", "parent\n")
+	gitRun(t, repo, "add", ".")
+	gitRunAt(t, repo, "2024-04-15T00:00:00Z", "commit", "-m", "Future-dated parent")
+
+	writeFile(t, repo, "child.txt", "child\n")
+	gitRun(t, repo, "add", ".")
+	gitRunAt(t, repo, "2024-04-01T00:00:00Z", "commit", "-m", "Earlier-dated child")
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{
+		"log", "--jsonl", "--snapshots",
+		"--after", "2024-04-10", "--before", "2024-05-01", repo,
+	}, &stdout, &stderr); err != nil {
+		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
+	}
+
+	snapshots := decodeSnapshots(t, stdout.Bytes())
+	if len(snapshots) != 2 {
+		t.Fatalf("snapshot count = %d, want 2\n%s", len(snapshots), stdout.String())
+	}
+	assertCountMetric(t, snapshots[0].Metrics, checkMaintained, "commits", "", 1)
+	assertCountMetric(t, snapshots[1].Metrics, checkMaintained, "commits", "", 2)
+}
+
+func TestLogFormatsTextCommitDatesInUTC(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+
+	writeFile(t, repo, "README.md", "# example\n")
+	gitRun(t, repo, "add", ".")
+	gitRunAtAs(
+		t, repo, "2024-01-31T23:30:00-05:00",
+		"dependabot[bot]", "49699333+dependabot[bot]@users.noreply.github.com",
+		"GitHub", "noreply@github.com",
+		"commit", "-m", "Bump dependency",
+	)
+	hash := gitOutput(t, repo, "rev-parse", "--short=12", "HEAD")
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{
+		"log", "--snapshots", "--after", "2024-02-01", "--before", "2024-02-02", repo,
+	}, &stdout, &stderr); err != nil {
+		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
+	}
+
+	matched := 0
+	for _, line := range strings.Split(stdout.String(), "\n") {
+		if !strings.Contains(line, hash) {
+			continue
+		}
+		matched++
+		if !strings.Contains(line, "  2024-02-01  ") {
+			t.Errorf("line uses non-UTC date: %s", line)
+		}
+	}
+	if matched != 2 {
+		t.Errorf("lines containing commit hash = %d, want 2\n%s", matched, stdout.String())
+	}
+	if strings.Contains(stdout.String(), "2024-01-31") {
+		t.Errorf("text output contains local-offset date:\n%s", stdout.String())
+	}
+}
+
 func TestDependencyBotDoesNotMatchEveryBot(t *testing.T) {
 	for _, identity := range []struct {
 		name  string
@@ -137,10 +212,10 @@ func TestDependencyBotDoesNotMatchEveryBot(t *testing.T) {
 	}
 }
 
-func TestCommitStreamEvictsRollingWindowAndKeepsRepositoryAge(t *testing.T) {
+func TestCommitStreamEvictsOutsideOrderAndKeepsRepositoryAge(t *testing.T) {
 	stream := newCommitStream(mailmap.New())
-	stream.add(testCommitAt(t, "2024-01-01T00:00:00Z", "Alice", "alice@example.org", "Initial commit"))
 	stream.add(testCommitAt(t, "2024-04-02T00:00:00Z", "Bob", "bob@example.org", "Recent commit"))
+	stream.add(testCommitAt(t, "2024-01-01T00:00:00Z", "Alice", "alice@example.org", "Initial commit"))
 
 	metrics := stream.metricsAt(mustTime(t, "2024-04-03T00:00:00Z"))
 	assertCountMetric(t, metrics, checkMaintained, "commits", "", 1)

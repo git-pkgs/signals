@@ -228,8 +228,11 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err err
 	if err != nil {
 		return err
 	}
-	snapshots, err := newSnapshotCollector(repo.Repository(), local, "file://"+uri, opts, cache, stats)
+	snapshots, err := newSnapshotCollector(repo, local, "file://"+uri, opts, cache, stats)
 	if err != nil {
+		return err
+	}
+	if err := snapshots.writeStart(stdout, opts.JSONL); err != nil {
 		return err
 	}
 	err = repo.WalkCommits(walk, func(commit githistory.Commit) error {
@@ -267,10 +270,6 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err err
 		if err != nil {
 			return err
 		}
-		if err := snapshots.beforeCommit(stdout, commit.Object, opts.JSONL); err != nil {
-			return err
-		}
-		snapshots.add(commit.Object)
 		if !parentHash.IsZero() {
 			states.release(parentHash)
 		}
@@ -414,7 +413,7 @@ func writeBoundarySnapshot(writer io.Writer, snapshot boundarySnapshot, jsonl bo
 		snapshot.boundary,
 		snapshot.date,
 		snapshot.commit.Hash.String()[:12],
-		snapshot.commit.Committer.When.Format(time.DateOnly),
+		snapshot.commit.Committer.When.UTC().Format(time.DateOnly),
 		githistory.CommitSubject(snapshot.commit.Message),
 	); err != nil {
 		return err
@@ -478,7 +477,7 @@ func writeCommitRecords(
 	} else {
 		if _, err := fmt.Fprintf(stdout, "%s  %s  %s\n",
 			commit.Hash.String()[:12],
-			commit.Committer.When.Format(time.DateOnly),
+			commit.Committer.When.UTC().Format(time.DateOnly),
 			githistory.CommitSubject(commit.Message),
 		); err != nil {
 			return err

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	githistory "github.com/git-pkgs/history"
 	"github.com/git-pkgs/mailmap"
 	git "github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing"
@@ -68,7 +69,6 @@ type commitWindowEntry struct {
 type commitStream struct {
 	mailmap              *mailmap.Mailmap
 	entries              []commitWindowEntry
-	entryStart           int
 	contributors         map[string]int
 	domains              map[string]int
 	reviewProxyCounts    map[string]int
@@ -81,18 +81,13 @@ type commitStream struct {
 }
 
 type snapshotCollector struct {
-	enabled      bool
-	stream       *commitStream
-	after        time.Time
-	before       time.Time
-	start        boundarySnapshot
-	end          boundarySnapshot
-	startWritten bool
-	endCaptured  bool
+	enabled bool
+	start   boundarySnapshot
+	end     boundarySnapshot
 }
 
 func newSnapshotCollector(
-	repo *git.Repository,
+	repo *githistory.Repo,
 	local *localDetectors,
 	uri string,
 	opts LogOptions,
@@ -111,19 +106,20 @@ func newSnapshotCollector(
 	if err != nil {
 		return nil, err
 	}
-	mm, mailmapOID, err := loadMailmap(repo, opts.Ref, cache)
+	gitRepo := repo.Repository()
+	mm, mailmapOID, err := loadMailmap(gitRepo, opts.Ref, cache)
 	if err != nil {
 		return nil, err
 	}
-	complete, err := historyIsComplete(repo, opts.Since)
+	complete, err := historyIsComplete(gitRepo, opts.Since)
 	if err != nil {
 		return nil, err
 	}
-	start, err := loadBoundarySnapshot(repo, local, uri, opts.Ref, "start", opts.After, cache, stats)
+	start, err := loadBoundarySnapshot(gitRepo, local, uri, opts.Ref, "start", opts.After, cache, stats)
 	if err != nil {
 		return nil, err
 	}
-	end, err := loadBoundarySnapshot(repo, local, uri, opts.Ref, "end", opts.Before, cache, stats)
+	end, err := loadBoundarySnapshot(gitRepo, local, uri, opts.Ref, "end", opts.Before, cache, stats)
 	if err != nil {
 		return nil, err
 	}
@@ -131,52 +127,70 @@ func newSnapshotCollector(
 	start.mailmapOID = mailmapOID
 	end.historyComplete = complete
 	end.mailmapOID = mailmapOID
-	collector.stream = newCommitStream(mm)
-	collector.after = after
-	collector.before = before
+	start.metrics, end.metrics, err = collectBoundaryMetrics(repo, opts, mm, after, before)
+	if err != nil {
+		return nil, err
+	}
 	collector.start = start
 	collector.end = end
 	return collector, nil
 }
 
-func (c *snapshotCollector) beforeCommit(writer io.Writer, commit *object.Commit, jsonl bool) error {
+func (c *snapshotCollector) writeStart(writer io.Writer, jsonl bool) error {
 	if !c.enabled {
 		return nil
 	}
-	if !c.startWritten && !commit.Committer.When.Before(c.after) {
-		c.start.metrics = c.stream.metricsAt(c.after)
-		if err := writeBoundarySnapshot(writer, c.start, jsonl); err != nil {
-			return err
-		}
-		c.startWritten = true
-	}
-	if !c.endCaptured && !commit.Committer.When.Before(c.before) {
-		c.end.metrics = c.stream.metricsAt(c.before)
-		c.endCaptured = true
-	}
-	return nil
-}
-
-func (c *snapshotCollector) add(commit *object.Commit) {
-	if c.enabled {
-		c.stream.add(commit)
-	}
+	return writeBoundarySnapshot(writer, c.start, jsonl)
 }
 
 func (c *snapshotCollector) finish(writer io.Writer, jsonl bool) error {
 	if !c.enabled {
 		return nil
 	}
-	if !c.startWritten {
-		c.start.metrics = c.stream.metricsAt(c.after)
-		if err := writeBoundarySnapshot(writer, c.start, jsonl); err != nil {
-			return err
-		}
-	}
-	if !c.endCaptured {
-		c.end.metrics = c.stream.metricsAt(c.before)
-	}
 	return writeBoundarySnapshot(writer, c.end, jsonl)
+}
+
+func collectBoundaryMetrics(
+	repo *githistory.Repo,
+	opts LogOptions,
+	mm *mailmap.Mailmap,
+	after, before time.Time,
+) ([]jsonlMetric, []jsonlMetric, error) {
+	hashes, err := repo.CommitHashes(githistory.CommitOptions{Ref: opts.Ref, Since: opts.Since})
+	if err != nil {
+		return nil, nil, err
+	}
+	entries := make([]commitWindowEntry, 0, len(hashes))
+	for _, hash := range hashes {
+		commit, err := repo.Repository().CommitObject(hash)
+		if err != nil {
+			return nil, nil, err
+		}
+		entries = append(entries, commitEntry(mm, commit))
+	}
+	sort.SliceStable(entries, func(i, j int) bool {
+		return entries[i].committedAt.Before(entries[j].committedAt)
+	})
+
+	stream := newCommitStream(mm)
+	var start, end []jsonlMetric
+	for _, entry := range entries {
+		if start == nil && !entry.committedAt.Before(after) {
+			start = stream.metricsAt(after)
+		}
+		if end == nil && !entry.committedAt.Before(before) {
+			end = stream.metricsAt(before)
+			break
+		}
+		stream.addEntry(entry)
+	}
+	if start == nil {
+		start = stream.metricsAt(after)
+	}
+	if end == nil {
+		end = stream.metricsAt(before)
+	}
+	return start, end, nil
 }
 
 func newCommitStream(mm *mailmap.Mailmap) *commitStream {
@@ -189,20 +203,26 @@ func newCommitStream(mm *mailmap.Mailmap) *commitStream {
 }
 
 func (s *commitStream) add(commit *object.Commit) {
-	s.evictBefore(commit.Committer.When.Add(-metricWindow))
+	s.addEntry(commitEntry(s.mailmap, commit))
+}
+
+func commitEntry(mm *mailmap.Mailmap, commit *object.Commit) commitWindowEntry {
 	entry := commitWindowEntry{
 		committedAt: commit.Committer.When,
 		human:       !isBotIdentity(commit.Author.Name, commit.Author.Email),
 		signed:      commit.Signature != "" || commit.SignatureSHA256 != "",
 	}
-	entry.contributor, entry.domain = canonicalIdentity(s.mailmap, commit.Author.Name, commit.Author.Email)
-	entry.reviewProxies = reviewProxies(s.mailmap, commit)
+	entry.contributor, entry.domain = canonicalIdentity(mm, commit.Author.Name, commit.Author.Email)
+	entry.reviewProxies = reviewProxies(mm, commit)
+	return entry
+}
 
-	if s.firstCommitAt.IsZero() || commit.Committer.When.Before(s.firstCommitAt) {
-		s.firstCommitAt = commit.Committer.When
+func (s *commitStream) addEntry(entry commitWindowEntry) {
+	if s.firstCommitAt.IsZero() || entry.committedAt.Before(s.firstCommitAt) {
+		s.firstCommitAt = entry.committedAt
 	}
-	if s.lastCommitAt.IsZero() || commit.Committer.When.After(s.lastCommitAt) {
-		s.lastCommitAt = commit.Committer.When
+	if s.lastCommitAt.IsZero() || entry.committedAt.After(s.lastCommitAt) {
+		s.lastCommitAt = entry.committedAt
 	}
 	s.entries = append(s.entries, entry)
 	s.commits++
@@ -258,40 +278,43 @@ func (s *commitStream) metricsAt(asOf time.Time) []jsonlMetric {
 }
 
 func (s *commitStream) evictBefore(cutoff time.Time) {
-	for s.entryStart < len(s.entries) && s.entries[s.entryStart].committedAt.Before(cutoff) {
-		entry := s.entries[s.entryStart]
-		s.entryStart++
+	write := 0
+	for _, entry := range s.entries {
+		if !entry.committedAt.Before(cutoff) {
+			s.entries[write] = entry
+			write++
+			continue
+		}
 		s.commits--
 		if entry.signed {
 			s.signedCommits--
 		}
-		if !entry.human {
-			continue
-		}
-		s.humanCommits--
-		if entry.contributor != "" {
-			s.contributors[entry.contributor]--
-			if s.contributors[entry.contributor] == 0 {
-				delete(s.contributors, entry.contributor)
-				if entry.domain != "" {
-					s.domains[entry.domain]--
-					if s.domains[entry.domain] == 0 {
-						delete(s.domains, entry.domain)
+		if entry.human {
+			s.humanCommits--
+			if entry.contributor != "" {
+				s.contributors[entry.contributor]--
+				if s.contributors[entry.contributor] == 0 {
+					delete(s.contributors, entry.contributor)
+					if entry.domain != "" {
+						s.domains[entry.domain]--
+						if s.domains[entry.domain] == 0 {
+							delete(s.domains, entry.domain)
+						}
 					}
 				}
 			}
-		}
-		if len(entry.reviewProxies) > 0 {
-			s.reviewedHumanCommits--
-		}
-		for _, proxy := range entry.reviewProxies {
-			s.reviewProxyCounts[proxy]--
+			if len(entry.reviewProxies) > 0 {
+				s.reviewedHumanCommits--
+			}
+			for _, proxy := range entry.reviewProxies {
+				s.reviewProxyCounts[proxy]--
+			}
 		}
 	}
-	if s.entryStart > 1024 && s.entryStart*2 > len(s.entries) {
-		s.entries = append([]commitWindowEntry(nil), s.entries[s.entryStart:]...)
-		s.entryStart = 0
+	for i := write; i < len(s.entries); i++ {
+		s.entries[i] = commitWindowEntry{}
 	}
+	s.entries = s.entries[:write]
 }
 
 func commitEvents(commit *object.Commit) []jsonlSignal {
