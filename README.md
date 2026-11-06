@@ -1,18 +1,23 @@
 # signals
 
-A command for tracing repository-contained security signals across Git history. It shows when detected evidence appears, changes, or disappears, with the commit and path behind each change.
-
-`signals` walks commit trees with [`github.com/git-pkgs/history`](https://github.com/git-pkgs/history). It runs ten raw detectors from OpenSSF Scorecard v5.6.0, then adds local tool, secret, and REUSE metadata detection from git-pkgs modules. The output contains raw findings and omits score calculation. The scan reads only local Git objects, with forge APIs, release APIs, credential validation, and external services disabled.
+A command for tracing security-relevant evidence stored in Git across repository history. It shows when detected evidence appears, changes, or disappears, with the commit and path behind each change. `signals` walks commit trees with [`github.com/git-pkgs/history`](https://github.com/git-pkgs/history). It combines ten raw detectors from OpenSSF Scorecard v5.6.0 with git-pkgs modules that detect CI and security tools, secrets, REUSE metadata, package managers, manifests, lockfiles, dependency pinning, and update configuration. Commit data adds dependency-bot and signature events plus contributor, maintenance, review, and signing metrics. The output contains the evidence and its provenance without calculating a score. The scan reads local Git objects, with forge APIs, release APIs, credential validation, and external services disabled.
 
 The local-only timeline answers questions about when repository evidence changed. Examples include:
 
-- When was a security policy added or removed?
+- What was the complete detected state before and after a grant-funded period?
+- When was a security policy, CI system, or security tool added or removed?
 - Which commit introduced an unpinned GitHub Action or container image?
 - How have workflow token permissions changed over time?
-- When did SAST, fuzzing, dependency updates, or SBOM files first appear?
-- When did a CI system, security scanner, build tool, or pre-commit runner appear?
+- When did a package manager, manifest, lockfile, or integrity record appear?
+- How did Dependabot or Renovate configuration and schedules change?
 - Did a credential enter the history, and when was it removed from the tree?
-- How did per-file SPDX licensing coverage change?
+- How did licensing coverage, contributor activity, review proxies, and commit signing change?
+
+## Repository evidence and limits
+
+Git retains deleted configuration, earlier licensing coverage, embedded commit signatures, canonical author identities, and the exact commit that introduced or removed a file-backed practice. The same local scan works across hosting services and avoids API rate limits. Blob IDs and changed paths allow results to be reused across thousands of commits.
+
+Some security state exists only on the hosting service or in an external dataset. Branch protection, webhooks, issue activity, successful CI runs, release assets, vulnerability databases, and external registries require separate sources. Review patterns in commit metadata do not prove that a pull request was approved, signature presence does not prove verification, and recent commits do not show whether a repository is marked as archived. Removing a credential from the tree does not remove its blob from Git history or show that it was revoked. Scorecard remains useful for current forge configuration and external evidence, while `signals` supplies the repository history those sources cannot reconstruct.
 
 ## Install
 
@@ -132,8 +137,13 @@ The additional detectors use the same persistent signal model:
 | Security-Tool | Security tools detected by Brief, with its taxonomy function retained as the signal kind |
 | Secrets-Management | SOPS configuration |
 | Pre-Commit | pre-commit, Lefthook, Husky, and Overcommit configuration |
+| Dependency-Update-Config | Dependabot and Renovate configuration, including package managers, directories, schedules, cooldowns, groups, and semantic configuration changes |
 | Package-Manager | The selected package manager for each detected package ecosystem and project directory |
 | Package-File | Manifest and lockfile presence, including files recognized by package-manager definitions before dependency parsing is available |
+| Dependency-Pin | Exact direct dependency constraints found in parsed manifests |
+| Dependency-Pinning | Exact, ranged, unparsed, and resolved dependency counts from manifests and lockfiles |
+| Lockfile-Integrity | Dependencies with declared integrity metadata compared with the total entries in a lockfile |
+| Package-Parse | Package files that were identified but could not be parsed |
 | Secret | Findings from the embedded `git-pkgs/secrets` rule corpus; output contains `[redacted]` in place of the credential |
 | REUSE | Per-file SPDX license declarations, REUSE.toml or DEP5 metadata, and the number of non-empty covered files with both license and copyright information |
 
@@ -143,7 +153,7 @@ The root commit receives a full scan. Later commits reuse their first parent's s
 
 File content is cached by Git blob OID for the whole run. Unchanged bytes are read once even when they appear in many commits or several detectors request them. Commit reading can run concurrently, while signal-state updates remain ordered. Fuzzing keeps a language inventory for each commit using `github.com/git-pkgs/languages`. Unambiguous extensions need no content read; ambiguous extensions use a cached 4 KB prefix. `github.com/git-pkgs/roles` removes vendored, generated, fixture, cache, and build-output paths from that inventory and from the files scanned for fuzzing patterns. Test paths remain eligible because fuzz targets commonly use them.
 
-Brief reads commit trees through `history.TreeFS` and reruns only when Brief's changed-file filter identifies an input to one of the emitted tool signals. Package-manager detection uses `managers.AffectedDirectories` to rescan only projects whose manager files changed. Secret scanning updates changed paths and caches results by blob OID and path because some rules depend on the filename. REUSE metadata changes trigger a full REUSE scan; ordinary changes update the affected file state and coverage count.
+Brief reads commit trees through `history.TreeFS` and reruns only when Brief's changed-file filter identifies an input to one of the emitted tool signals. Package files are parsed when their paths change, while package-manager detection uses `managers.AffectedDirectories` to rescan only the affected projects. Secret scanning updates changed paths and caches results by blob OID and path because some rules depend on the filename. REUSE metadata changes trigger a full REUSE scan; ordinary changes update the affected file state and coverage count.
 
 ## Related git-pkgs modules
 
