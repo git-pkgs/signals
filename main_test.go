@@ -627,6 +627,59 @@ func TestLogScansEveryDetectedLanguage(t *testing.T) {
 	}
 }
 
+func TestLogTracksBriefLanguagesAcrossSymlinkTransitions(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.name", "Signals Test")
+	gitRun(t, repo, "config", "user.email", "signals@example.com")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+
+	writeFile(t, repo, "README.md", "# Example\n")
+	writeFile(t, repo, testRubyPath, "puts 'hello'\n")
+	writeFile(t, repo, ".overcommit.yml", "PreCommit: {}\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Add Ruby project")
+
+	if err := os.Remove(filepath.Join(repo, testRubyPath)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("README.md", filepath.Join(repo, testRubyPath)); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "add", "-A")
+	gitRun(t, repo, "commit", "-m", "Replace Ruby file with symlink")
+
+	if err := os.Remove(filepath.Join(repo, testRubyPath)); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, repo, testRubyPath, "puts 'hello again'\n")
+	gitRun(t, repo, "add", "-A")
+	gitRun(t, repo, "commit", "-m", "Restore Ruby file")
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"log", "--workers", "1", repo}, &stdout, &stderr); err != nil {
+		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
+	}
+
+	output := stdout.String()
+	for _, expected := range []string{
+		"Add Ruby project",
+		"Replace Ruby file with symlink",
+		"- Pre-Commit/Overcommit at .overcommit.yml",
+		"Restore Ruby file",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Errorf("output missing %q:\n%s", expected, output)
+		}
+	}
+	if additions := strings.Count(output, "+ Pre-Commit/Overcommit at .overcommit.yml"); additions != 2 {
+		t.Errorf("Overcommit additions = %d, want 2:\n%s", additions, output)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected detection errors:\n%s", stderr.String())
+	}
+}
+
 func TestLogRebuildsLanguagesAtShallowBoundary(t *testing.T) {
 	repo := t.TempDir()
 	gitRun(t, repo, "init", "-b", "main")

@@ -85,6 +85,23 @@ func TestBriefLanguagesMayChangeOnlyForLanguageTransitions(t *testing.T) {
 			want:    false,
 		},
 		{
+			name: "Ruby file replaced by symlink",
+			change: githistory.Change{
+				Path: testRubyPath, OldOID: "1", NewOID: "2",
+				OldMode: "100644", NewMode: "120000",
+			},
+			current: []string{testRubyName},
+			want:    true,
+		},
+		{
+			name: "Ruby symlink replaced by file",
+			change: githistory.Change{
+				Path: testRubyPath, OldOID: "1", NewOID: "2",
+				OldMode: "120000", NewMode: "100644",
+			},
+			want: true,
+		},
+		{
 			name:    "Ruby file removed",
 			change:  githistory.Change{Path: testRubyPath, OldOID: "1"},
 			current: []string{testRubyName},

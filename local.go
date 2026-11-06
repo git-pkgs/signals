@@ -426,8 +426,7 @@ func (d *localDetectors) briefLanguagesMayChange(
 		if !included[change.Path] {
 			continue
 		}
-		added := nonzeroOID(change.OldOID) == "" && nonzeroOID(change.NewOID) != ""
-		removed := nonzeroOID(change.OldOID) != "" && nonzeroOID(change.NewOID) == ""
+		added, removed := briefFileTransition(change)
 		if !added && !removed {
 			continue
 		}
@@ -439,6 +438,27 @@ func (d *localDetectors) briefLanguagesMayChange(
 		}
 	}
 	return false
+}
+
+func briefFileTransition(change githistory.Change) (added, removed bool) {
+	oldFile, oldModeKnown := encodedLanguageFileMode(change.OldMode)
+	newFile, newModeKnown := encodedLanguageFileMode(change.NewMode)
+	if oldModeKnown && newModeKnown {
+		return !oldFile && newFile, oldFile && !newFile
+	}
+	return nonzeroOID(change.OldOID) == "" && nonzeroOID(change.NewOID) != "",
+		nonzeroOID(change.OldOID) != "" && nonzeroOID(change.NewOID) == ""
+}
+
+func encodedLanguageFileMode(encoded string) (bool, bool) {
+	if encoded == "" {
+		return false, false
+	}
+	mode, err := filemode.New(encoded)
+	if err != nil {
+		return false, false
+	}
+	return languageFileMode(mode), true
 }
 
 func newBriefImpactReport(knowledge *kb.KnowledgeBase) *gitbrief.Report {
