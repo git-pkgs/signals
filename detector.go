@@ -19,7 +19,6 @@ const (
 	checkDependencyUpdateTool = "Dependency-Update-Tool"
 	checkFuzzing              = "Fuzzing"
 	checkLicense              = "License"
-	checkPinnedDependencies   = "Pinned-Dependencies"
 	checkSAST                 = "SAST"
 	checkSBOM                 = "SBOM"
 	checkSecurityPolicy       = "Security-Policy"
@@ -61,7 +60,6 @@ var scorecardDetectors = []detector{
 	{name: checkDependencyUpdateTool, impact: impactDependencyUpdate, run: detectDependencyUpdateTools},
 	{name: checkFuzzing, impact: impactFuzzing, include: includeFuzzingPath, run: detectFuzzing},
 	{name: checkLicense, impact: impactLicense, run: detectLicenses},
-	{name: checkPinnedDependencies, impact: impactPinnedDependencies, run: detectPinnedDependencies},
 	{name: checkSAST, impact: impactSAST, run: detectSAST},
 	{name: checkSBOM, impact: impactSBOM, run: detectSBOMs},
 	{name: checkSecurityPolicy, impact: impactSecurityPolicy, run: detectSecurityPolicies},
@@ -221,29 +219,6 @@ func detectLicenses(request *checker.CheckRequest) ([]Signal, error) {
 	return signals, nil
 }
 
-func detectPinnedDependencies(request *checker.CheckRequest) ([]Signal, error) {
-	data, err := raw.PinningDependencies(request)
-	if err != nil {
-		return nil, err
-	}
-	var signals []Signal
-	for _, dependency := range data.Dependencies {
-		if dependency.Location == nil {
-			continue
-		}
-		signal := Signal{
-			Check: checkPinnedDependencies,
-			Kind:  string(dependency.Type),
-			Name:  stringValue(dependency.Name),
-			Value: pinValue(dependency),
-			Path:  dependency.Location.Path,
-			Line:  dependency.Location.Offset,
-		}
-		signals = append(signals, signal)
-	}
-	return signals, nil
-}
-
 func detectSAST(request *checker.CheckRequest) ([]Signal, error) {
 	data, err := raw.SAST(request)
 	if err != nil {
@@ -379,15 +354,6 @@ func impactLicense(path string) detectionImpact {
 	return impactNone
 }
 
-func impactPinnedDependencies(path string) detectionImpact {
-	name := strings.ToLower(filepath.Base(path))
-	if strings.HasSuffix(name, ".csproj") ||
-		(strings.HasPrefix(name, "directory.") && strings.HasSuffix(name, ".props")) {
-		return impactFull
-	}
-	return impactPartial
-}
-
 func impactSAST(path string) detectionImpact {
 	if impactWorkflow(path) == impactPartial || strings.EqualFold(filepath.Base(path), "pom.xml") {
 		return impactPartial
@@ -456,19 +422,6 @@ func workflowJobName(job *checker.WorkflowJob) string {
 		return *job.Name
 	}
 	return stringValue(job.ID)
-}
-
-func pinValue(dependency checker.Dependency) string {
-	switch {
-	case dependency.Pinned == nil:
-		return "unknown"
-	case *dependency.Pinned && dependency.PinnedAt != nil:
-		return "pinned@" + *dependency.PinnedAt
-	case *dependency.Pinned:
-		return "pinned"
-	default:
-		return "unpinned"
-	}
 }
 
 func permissionValue(permission checker.TokenPermission) string {

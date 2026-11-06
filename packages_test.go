@@ -8,6 +8,8 @@ import (
 	githistory "github.com/git-pkgs/history"
 )
 
+const exactAndRangedSummary = "exact=1; ranged=1; unparsed=0"
+
 func TestPackageFileSignalsFindsExactManifestPins(t *testing.T) {
 	signals := packageFileSignals(packageJSONPath, []byte(`{
       "name": "example",
@@ -25,9 +27,91 @@ func TestPackageFileSignalsFindsExactManifestPins(t *testing.T) {
 	if pin.Value != "1.2.3" {
 		t.Errorf("exact pin = %q, want 1.2.3", pin.Value)
 	}
+	constraint := findPackageSignal(t, signals, checkDependencyConstraint, "npm", "pkg:npm/ranged")
+	if constraint.Value != "^2.0.0" {
+		t.Errorf("ranged constraint = %q, want ^2.0.0", constraint.Value)
+	}
 	summary := findPackageSignal(t, signals, checkDependencyPinning, "npm", "")
-	if summary.Value != "exact=1; ranged=1; unparsed=0" {
+	if summary.Value != exactAndRangedSummary {
 		t.Errorf("pinning summary = %q", summary.Value)
+	}
+}
+
+func TestPackageFileSignalsClassifiesGitHubActionPins(t *testing.T) {
+	const pinned = "de0fac2e4500dabe0009e67214ff5f5447ce83dd"
+	signals := packageFileSignals(".github/workflows/ci.yml", []byte(`jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@`+pinned+`
+      - uses: actions/setup-go@v6
+`))
+
+	pin := findPackageSignal(t, signals, checkDependencyPin, "github-actions", "pkg:githubactions/actions/checkout")
+	if pin.Value != pinned {
+		t.Errorf("action pin = %q, want %s", pin.Value, pinned)
+	}
+	legacy := findPackageSignal(t, signals, checkPinnedDependencies, "GitHubAction", "actions/checkout")
+	if legacy.Value != "pinned@"+pinned {
+		t.Errorf("pinned action value = %q", legacy.Value)
+	}
+	unpinned := findPackageSignal(t, signals, checkPinnedDependencies, "GitHubAction", "actions/setup-go")
+	if unpinned.Value != "unpinned" {
+		t.Errorf("unpinned action value = %q", unpinned.Value)
+	}
+	constraint := findPackageSignal(t, signals, checkDependencyConstraint, "github-actions", "pkg:githubactions/actions/setup-go")
+	if constraint.Value != "v6" {
+		t.Errorf("action constraint = %q, want v6", constraint.Value)
+	}
+	summary := findPackageSignal(t, signals, checkDependencyPinning, "github-actions", "")
+	if summary.Value != exactAndRangedSummary {
+		t.Errorf("action pinning summary = %q", summary.Value)
+	}
+}
+
+func TestClassifyDependencyPinRequiresFullGitHubCommitSHA(t *testing.T) {
+	tests := []struct {
+		name    string
+		version string
+		pinned  bool
+	}{
+		{name: "short SHA", version: strings.Repeat("a", 39)},
+		{name: "full SHA", version: strings.Repeat("a", 40), pinned: true},
+		{name: "long hexadecimal ref", version: strings.Repeat("a", 41)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			version, pinned, classified := classifyDependencyPin(tt.version, "github-actions")
+			if version != tt.version || pinned != tt.pinned || !classified {
+				t.Fatalf("classifyDependencyPin() = %q, %t, %t", version, pinned, classified)
+			}
+		})
+	}
+}
+
+func TestPackageFileSignalsClassifiesContainerDigests(t *testing.T) {
+	const digest = "sha256:9cb31e2e37ea84c54fd72af82d7d454d24f714bd7ee2b7eb350f3231b3e1f5a0"
+	signals := packageFileSignals("Dockerfile", []byte("FROM ruby:3.4\nFROM alpine@"+digest+"\n"))
+
+	pin := findPackageSignal(t, signals, checkDependencyPin, "docker", "pkg:docker/alpine")
+	if pin.Value != digest {
+		t.Errorf("container pin = %q, want %s", pin.Value, digest)
+	}
+	pinned := findPackageSignal(t, signals, checkPinnedDependencies, "containerImage", "alpine")
+	if pinned.Value != "pinned@"+digest {
+		t.Errorf("pinned container value = %q", pinned.Value)
+	}
+	unpinned := findPackageSignal(t, signals, checkPinnedDependencies, "containerImage", "ruby")
+	if unpinned.Value != "unpinned" {
+		t.Errorf("unpinned container value = %q", unpinned.Value)
+	}
+	constraint := findPackageSignal(t, signals, checkDependencyConstraint, "docker", "pkg:docker/ruby")
+	if constraint.Value != "3.4" {
+		t.Errorf("container constraint = %q, want 3.4", constraint.Value)
+	}
+	summary := findPackageSignal(t, signals, checkDependencyPinning, "docker", "")
+	if summary.Value != exactAndRangedSummary {
+		t.Errorf("container pinning summary = %q", summary.Value)
 	}
 }
 

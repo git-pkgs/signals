@@ -14,20 +14,24 @@ import (
 )
 
 const (
-	detectorPackages       = "Packages"
-	checkPackageFile       = "Package-File"
-	checkDependencyPin     = "Dependency-Pin"
-	checkDependencyPinning = "Dependency-Pinning"
-	checkLockfileIntegrity = "Lockfile-Integrity"
-	checkPackageParse      = "Package-Parse"
+	detectorPackages          = "Packages"
+	checkPackageFile          = "Package-File"
+	checkDependencyConstraint = "Dependency-Constraint"
+	checkDependencyPin        = "Dependency-Pin"
+	checkDependencyPinning    = "Dependency-Pinning"
+	checkLockfileIntegrity    = "Lockfile-Integrity"
+	checkPackageParse         = "Package-Parse"
+	checkPinnedDependencies   = "Pinned-Dependencies"
 )
 
 var packageChecks = map[string]bool{
-	checkPackageFile:       true,
-	checkDependencyPin:     true,
-	checkDependencyPinning: true,
-	checkLockfileIntegrity: true,
-	checkPackageParse:      true,
+	checkPackageFile:          true,
+	checkDependencyConstraint: true,
+	checkDependencyPin:        true,
+	checkDependencyPinning:    true,
+	checkLockfileIntegrity:    true,
+	checkPackageParse:         true,
+	checkPinnedDependencies:   true,
 }
 
 type packageCacheKey struct {
@@ -151,35 +155,50 @@ func manifestPinSignals(path string, result *manifests.ParseResult) []Signal {
 	var signals []Signal
 	var exact, ranged, unparsed int
 	for _, declaration := range declarations {
-		if !declaration.Direct || declaration.Version == "" {
+		if !declaration.Direct {
 			continue
 		}
 		ecosystem := declaration.Ecosystem
 		if ecosystem == "" {
 			ecosystem = result.Ecosystem
 		}
-		rng, err := vers.ParseNative(declaration.Version, ecosystem)
-		if err != nil {
-			unparsed++
-			continue
-		}
-		version, pinned := rng.ExactVersion()
-		if !pinned {
-			ranged++
-			continue
-		}
-		exact++
 		name := declaration.PURL
 		if name == "" {
 			name = declaration.Name
 		}
-		signals = append(signals, Signal{
-			Check: checkDependencyPin,
-			Kind:  ecosystem,
-			Name:  name,
-			Value: version,
-			Path:  path,
-		})
+		constraint := declaration.Version
+		if constraint == "" {
+			constraint = "unversioned"
+		}
+
+		version, pinned, classified := classifyDependencyPin(declaration.Version, ecosystem)
+		switch {
+		case !classified:
+			unparsed++
+		case !pinned:
+			ranged++
+		default:
+			exact++
+			signals = append(signals, Signal{
+				Check: checkDependencyPin,
+				Kind:  ecosystem,
+				Name:  name,
+				Value: version,
+				Path:  path,
+			})
+		}
+		if !classified || !pinned {
+			signals = append(signals, Signal{
+				Check: checkDependencyConstraint,
+				Kind:  ecosystem,
+				Name:  name,
+				Value: constraint,
+				Path:  path,
+			})
+		}
+		if signal, ok := pinnedDependencySignal(path, declaration, pinned, version); ok {
+			signals = append(signals, signal)
+		}
 	}
 
 	if exact+ranged+unparsed > 0 {
@@ -193,6 +212,63 @@ func manifestPinSignals(path string, result *manifests.ParseResult) []Signal {
 		})
 	}
 	return signals
+}
+
+func classifyDependencyPin(version, ecosystem string) (string, bool, bool) {
+	if version == "" {
+		return "", false, false
+	}
+	switch ecosystem {
+	case "github-actions":
+		return version, len(version) == 40 && isHex(version), true
+	case "docker":
+		digest, ok := strings.CutPrefix(version, "sha256:")
+		return version, ok && len(digest) == 64 && isHex(digest), true
+	default:
+		rng, err := vers.ParseNative(version, ecosystem)
+		if err != nil {
+			return "", false, false
+		}
+		exact, pinned := rng.ExactVersion()
+		return exact, pinned, true
+	}
+}
+
+func isHex(value string) bool {
+	for _, char := range value {
+		if !strings.ContainsRune("0123456789abcdefABCDEF", char) {
+			return false
+		}
+	}
+	return value != ""
+}
+
+func pinnedDependencySignal(
+	path string,
+	declaration manifests.Declaration,
+	pinned bool,
+	version string,
+) (Signal, bool) {
+	var kind string
+	switch declaration.Ecosystem {
+	case "github-actions":
+		kind = "GitHubAction"
+	case "docker":
+		kind = "containerImage"
+	default:
+		return Signal{}, false
+	}
+	value := "unpinned"
+	if pinned {
+		value = "pinned@" + version
+	}
+	return Signal{
+		Check: checkPinnedDependencies,
+		Kind:  kind,
+		Name:  declaration.Name,
+		Value: value,
+		Path:  path,
+	}, true
 }
 
 func dependenciesAsDeclarations(dependencies []manifests.Dependency) []manifests.Declaration {
