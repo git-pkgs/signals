@@ -4,43 +4,35 @@ import (
 	"testing"
 
 	gitlanguages "github.com/git-pkgs/languages"
-	"github.com/ossf/scorecard/v5/clients"
 )
 
-func TestScorecardLanguageName(t *testing.T) {
-	tests := []struct {
-		language gitlanguages.Language
-		want     clients.LanguageName
-	}{
-		{language: gitlanguages.Go, want: clients.Go},
-		{language: gitlanguages.JSX, want: clients.JavaScript},
-		{language: gitlanguages.TSX, want: clients.TypeScript},
-		{language: gitlanguages.C2hsHaskell, want: clients.Haskell},
-		{language: gitlanguages.LiterateHaskell, want: clients.Haskell},
+func TestLanguageInventoryTracksEveryDetectedLanguage(t *testing.T) {
+	inventory := make(languageInventory)
+	if err := inventory.applyDetectedLanguage(gitlanguages.Ruby, 1); err != nil {
+		t.Fatal(err)
 	}
-	for _, test := range tests {
-		if got := scorecardLanguageName(test.language); got != test.want {
-			t.Errorf("scorecardLanguageName(%s) = %q, want %q", test.language, got, test.want)
-		}
+	if inventory[gitlanguages.Ruby] != 1 {
+		t.Fatalf("Ruby count = %d", inventory[gitlanguages.Ruby])
 	}
 }
 
-func TestFuzzingLanguageNameRejectsUnsupportedLanguage(t *testing.T) {
-	if name, ok := fuzzingLanguageName(gitlanguages.Ruby); ok {
-		t.Fatalf("fuzzingLanguageName(Ruby) = %q, true", name)
-	}
-}
-
-func TestIncludeFuzzingPathUsesLanguagePathCache(t *testing.T) {
+func TestLanguagePathUsesCache(t *testing.T) {
 	cache := &blobCache{languagePaths: make(map[string]languagePath)}
 	const path = "src/fuzz_test.go"
-	if !cache.includeFuzzingPath(path) {
-		t.Fatalf("includeFuzzingPath(%q) = false", path)
+	info, err := cache.languagePath(path)
+	if err != nil {
+		t.Fatal(err)
 	}
-	info := cache.languagePaths[path]
+	if !info.include || info.language != gitlanguages.Go {
+		t.Fatalf("languagePath(%q) = %#v", path, info)
+	}
 	info.include = false
 	cache.languagePaths[path] = info
-	if cache.includeFuzzingPath(path) {
-		t.Fatalf("cached includeFuzzingPath(%q) = true", path)
+	cached, err := cache.languagePath(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cached.include {
+		t.Fatalf("cached languagePath(%q) = %#v", path, cached)
 	}
 }

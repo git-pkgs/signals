@@ -1,56 +1,21 @@
 package main
 
 import (
-	"errors"
 	"fmt"
-	"io"
-	"sort"
-	"strings"
 
 	githistory "github.com/git-pkgs/history"
 	gitlanguages "github.com/git-pkgs/languages"
 	"github.com/git-pkgs/roles"
-	"github.com/go-git/go-git/v6/plumbing"
 	"github.com/go-git/go-git/v6/plumbing/filemode"
 	"github.com/go-git/go-git/v6/plumbing/object"
-	"github.com/ossf/scorecard/v5/clients"
 )
-
-type languageBlob struct {
-	analysis gitlanguages.Analysis
-}
 
 type languagePath struct {
 	include  bool
 	language gitlanguages.Language
-	analyze  bool
 }
 
-const languageAnalysisBytes int64 = 4 << 10
-
-var fuzzingLanguageCandidates = gitlanguages.NewSet(
-	gitlanguages.Go,
-	gitlanguages.Erlang,
-	gitlanguages.Haskell,
-	gitlanguages.C2hsHaskell,
-	gitlanguages.LiterateHaskell,
-	gitlanguages.Elixir,
-	gitlanguages.Gleam,
-	gitlanguages.JavaScript,
-	gitlanguages.JSX,
-	gitlanguages.TypeScript,
-	gitlanguages.TSX,
-	gitlanguages.Python,
-	gitlanguages.C,
-	gitlanguages.CPP,
-	gitlanguages.Rust,
-	gitlanguages.Java,
-	gitlanguages.Swift,
-	gitlanguages.CSharp,
-	gitlanguages.FSharp,
-)
-
-type languageInventory map[clients.LanguageName]int64
+type languageInventory map[gitlanguages.Language]int64
 
 func languageInventoryForCommit(
 	parent languageInventory,
@@ -100,10 +65,10 @@ func updateLanguageInventory(
 			inventory = parent.clone()
 			cloned = true
 		}
-		if err := inventory.applyChange(change.Path, change.OldOID, change.OldMode, -1, cache); err != nil {
+		if err := inventory.applyChange(change.Path, change.OldMode, -1, cache); err != nil {
 			return nil, err
 		}
-		if err := inventory.applyChange(change.Path, change.NewOID, change.NewMode, 1, cache); err != nil {
+		if err := inventory.applyChange(change.Path, change.NewMode, 1, cache); err != nil {
 			return nil, err
 		}
 	}
@@ -115,13 +80,8 @@ func languageChangeAffectsInventory(change githistory.Change, cache *blobCache) 
 	if err != nil {
 		return false, err
 	}
-	if !pathInfo.include || pathInfo.language == gitlanguages.Unknown && !pathInfo.analyze {
+	if !pathInfo.include || pathInfo.language == gitlanguages.Unknown {
 		return false, nil
-	}
-	if pathInfo.language != gitlanguages.Unknown {
-		if _, supported := fuzzingLanguageName(pathInfo.language); !supported {
-			return false, nil
-		}
 	}
 	oldMode, err := filemode.New(change.OldMode)
 	if err != nil {
@@ -135,10 +95,7 @@ func languageChangeAffectsInventory(change githistory.Change, cache *blobCache) 
 	if oldFile != newFile {
 		return true, nil
 	}
-	if !oldFile || change.OldOID == change.NewOID {
-		return false, nil
-	}
-	return pathInfo.language == gitlanguages.Unknown && pathInfo.analyze, nil
+	return false, nil
 }
 
 func (i languageInventory) clone() languageInventory {
@@ -150,7 +107,7 @@ func (i languageInventory) clone() languageInventory {
 }
 
 func (i languageInventory) applyChange(
-	path, oid, encodedMode string,
+	path, encodedMode string,
 	direction int64,
 	cache *blobCache,
 ) error {
@@ -168,21 +125,7 @@ func (i languageInventory) applyChange(
 	if !pathInfo.include {
 		return nil
 	}
-	if pathInfo.language != gitlanguages.Unknown {
-		return i.applyDetectedLanguage(pathInfo.language, direction)
-	}
-	if !pathInfo.analyze {
-		return nil
-	}
-	hash, ok := plumbing.FromHex(oid)
-	if !ok {
-		return fmt.Errorf("parse object ID for %s", path)
-	}
-	blob, err := cache.languageBlobOID(hash)
-	if err != nil {
-		return fmt.Errorf("analyze %s language: %w", path, err)
-	}
-	return i.applyLanguage(path, blob, direction)
+	return i.applyDetectedLanguage(pathInfo.language, direction)
 }
 
 func (i languageInventory) applyFile(path string, file *object.File, direction int64, cache *blobCache) error {
@@ -196,114 +139,30 @@ func (i languageInventory) applyFile(path string, file *object.File, direction i
 	if !pathInfo.include {
 		return nil
 	}
-	if pathInfo.language != gitlanguages.Unknown {
-		return i.applyDetectedLanguage(pathInfo.language, direction)
-	}
-	if !pathInfo.analyze {
-		return nil
-	}
-	blob, err := cache.languageBlob(file)
-	if err != nil {
-		return fmt.Errorf("analyze %s language: %w", path, err)
-	}
-	return i.applyLanguage(path, blob, direction)
+	return i.applyDetectedLanguage(pathInfo.language, direction)
 }
 
 func languageFileMode(mode filemode.FileMode) bool {
 	return mode == filemode.Regular || mode == filemode.Deprecated || mode == filemode.Executable
 }
 
-func (i languageInventory) applyLanguage(path string, blob languageBlob, direction int64) error {
-	result := blob.analysis.Detect(path)
-	if result.Language == gitlanguages.Unknown {
-		return nil
-	}
-	return i.applyDetectedLanguage(result.Language, direction)
-}
-
 func (i languageInventory) applyDetectedLanguage(
 	language gitlanguages.Language,
 	direction int64,
 ) error {
-	name, supported := fuzzingLanguageName(language)
-	if !supported {
+	if language == gitlanguages.Unknown {
 		return nil
 	}
-	next := i[name] + direction
+	next := i[language] + direction
 	if next < 0 {
-		return fmt.Errorf("language byte count became negative for %s", name)
+		return fmt.Errorf("language byte count became negative for %s", language)
 	}
 	if next == 0 {
-		delete(i, name)
+		delete(i, language)
 	} else {
-		i[name] = next
+		i[language] = next
 	}
 	return nil
-}
-
-func fuzzingLanguageName(language gitlanguages.Language) (clients.LanguageName, bool) {
-	name := scorecardLanguageName(language)
-	switch name {
-	case clients.Go, clients.Erlang, clients.Haskell, clients.Elixir, clients.Gleam,
-		clients.JavaScript, clients.TypeScript, clients.Python, clients.C, clients.Cpp,
-		clients.Rust, clients.Java, clients.Swift, clients.CSharp, clients.FSharp:
-		return name, true
-	default:
-		return "", false
-	}
-}
-
-func scorecardLanguageName(language gitlanguages.Language) clients.LanguageName {
-	switch language {
-	case gitlanguages.JSX:
-		return clients.JavaScript
-	case gitlanguages.TSX:
-		return clients.TypeScript
-	case gitlanguages.C2hsHaskell, gitlanguages.LiterateHaskell:
-		return clients.Haskell
-	default:
-		return clients.LanguageName(strings.ToLower(language.String()))
-	}
-}
-
-func (c *blobCache) languageBlob(file *object.File) (languageBlob, error) {
-	key := file.Hash.String()
-	if blob, ok := c.languageBlobs[key]; ok {
-		return blob, nil
-	}
-	data, cached := c.data[key]
-	complete := true
-	if !cached {
-		reader, err := file.Reader()
-		if err != nil {
-			return languageBlob{}, err
-		}
-		limit := min(file.Size, languageAnalysisBytes)
-		var readErr error
-		data, readErr = io.ReadAll(io.LimitReader(reader, limit))
-		err = errors.Join(readErr, reader.Close())
-		if err != nil {
-			return languageBlob{}, err
-		}
-		complete = int64(len(data)) == file.Size
-	}
-	var analysis gitlanguages.Analysis
-	gitlanguages.Analyze(data, complete, &analysis)
-	blob := languageBlob{analysis: analysis}
-	c.languageBlobs[key] = blob
-	return blob, nil
-}
-
-func (c *blobCache) languageBlobOID(hash plumbing.Hash) (languageBlob, error) {
-	key := hash.String()
-	if blob, ok := c.languageBlobs[key]; ok {
-		return blob, nil
-	}
-	objectBlob, err := c.repository.BlobObject(hash)
-	if err != nil {
-		return languageBlob{}, err
-	}
-	return c.languageBlob(object.NewFile("", filemode.Regular, objectBlob))
 }
 
 func (c *blobCache) languagePath(path string) (languagePath, error) {
@@ -318,7 +177,6 @@ func (c *blobCache) languagePath(path string) (languagePath, error) {
 	result := languagePath{
 		include:  include,
 		language: context.Result().Language,
-		analyze:  !context.Candidates.Intersect(fuzzingLanguageCandidates).Empty(),
 	}
 	c.languagePaths[path] = result
 	return result, nil
@@ -330,29 +188,6 @@ func includeLanguagePath(path string) (bool, error) {
 		return false, fmt.Errorf("classify %s: %w", path, err)
 	}
 	return !set.BundledOrDerived() && !set.Has(roles.Generated), nil
-}
-
-func includeFuzzingPath(path string) bool {
-	include, err := includeLanguagePath(path)
-	return err == nil && include
-}
-
-func (c *blobCache) includeFuzzingPath(path string) bool {
-	info, err := c.languagePath(path)
-	return err == nil && info.include
-}
-
-func (i languageInventory) scorecard() []clients.Language {
-	names := make([]clients.LanguageName, 0, len(i))
-	for name := range i {
-		names = append(names, name)
-	}
-	sort.Slice(names, func(left, right int) bool { return names[left] < names[right] })
-	result := make([]clients.Language, 0, len(names))
-	for _, name := range names {
-		result = append(result, clients.Language{Name: name, NumLines: 1})
-	}
-	return result
 }
 
 func (i languageInventory) sameLanguages(other languageInventory) bool {

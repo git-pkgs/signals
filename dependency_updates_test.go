@@ -192,7 +192,7 @@ func TestDependencyUpdateConfigSignalsReadsPackageJSONPreset(t *testing.T) {
 
 func TestDependencyUpdateConfigSignalsTreatsEmptyRenovateConfigAsEmptyObject(t *testing.T) {
 	signals, err := dependencyUpdateConfigSignals(fstest.MapFS{
-		"renovate.json": {Data: nil},
+		renovateJSONPath: {Data: nil},
 	})
 	if err != nil {
 		t.Fatalf("dependencyUpdateConfigSignals: %v", err)
@@ -206,7 +206,7 @@ func TestDependencyUpdateConfigSignalsTreatsEmptyRenovateConfigAsEmptyObject(t *
 
 func TestDependencyUpdateConfigSignalsRejectsDuplicateRenovateJSONKeys(t *testing.T) {
 	signals, err := dependencyUpdateConfigSignals(fstest.MapFS{
-		"renovate.json": {Data: []byte(`{
+		renovateJSONPath: {Data: []byte(`{
           "packageRules": [{"enabled": true, "enabled": false}]
         }`)},
 	})
@@ -232,6 +232,27 @@ func TestDependencyUpdateConfigSignalsParsesPackageJSONStrictly(t *testing.T) {
 	}
 	if len(signals) != 0 {
 		t.Errorf("signals = %#v, want none", signals)
+	}
+}
+
+func TestDependencyUpdateConfigSignalsDetectsUpdateTools(t *testing.T) {
+	signals, err := dependencyUpdateConfigSignals(fstest.MapFS{
+		dependabotYMLPath:     {Data: []byte("version: 2\nupdates: []\n")},
+		renovateJSONPath:      {Data: []byte(`{}`)},
+		".scala-steward.conf": {Data: []byte("updates.pin = true\n")},
+	})
+	if err != nil {
+		t.Fatalf("dependencyUpdateConfigSignals: %v", err)
+	}
+
+	for _, wanted := range []Signal{
+		dependencyUpdateToolSignal(dependencyToolDependabot, dependabotYMLPath),
+		dependencyUpdateToolSignal(dependencyToolRenovate, renovateJSONPath),
+		dependencyUpdateToolSignal("Scala Steward", ".scala-steward.conf"),
+	} {
+		if !containsExactSignal(signals, wanted) {
+			t.Errorf("signal missing: %#v\ngot: %#v", wanted, signals)
+		}
 	}
 }
 

@@ -33,7 +33,9 @@ const (
 	checkSecretsManagement = "Secrets-Management"
 	checkSecurityTool      = "Security-Tool"
 
-	detectorBrief = "Brief"
+	detectorBrief           = "Brief"
+	detectorRepositoryFiles = "Repository-Files"
+	detectorWorkflows       = "Workflows"
 
 	maxSecretBlobSize   = 1 << 20
 	reuseMarkerReadSize = 32 * 1024
@@ -44,6 +46,8 @@ var localDetectorNames = []string{
 	checkDependencyUpdateConfig,
 	detectorPackages,
 	detectorPackageManagers,
+	detectorRepositoryFiles,
+	detectorWorkflows,
 	checkSecret,
 	checkREUSE,
 }
@@ -55,14 +59,16 @@ var reuseMetadataMarkers = [...][]byte{
 }
 
 type localDetectors struct {
-	repo            *githistory.Repo
-	knowledge       *kb.KnowledgeBase
-	briefImpact     *gitbrief.Report
-	secretScanner   *scanner.Scanner
-	secretCache     map[secretCacheKey][]Signal
-	packageCache    map[packageCacheKey][]Signal
-	packageManagers *packageManagerDetector
-	reuseMarkers    map[plumbing.Hash]bool
+	repo                *githistory.Repo
+	knowledge           *kb.KnowledgeBase
+	briefImpact         *gitbrief.Report
+	secretScanner       *scanner.Scanner
+	secretCache         map[secretCacheKey][]Signal
+	packageCache        map[packageCacheKey][]Signal
+	repositoryFileCache map[repositoryFileCacheKey][]Signal
+	workflowCache       map[workflowCacheKey][]Signal
+	packageManagers     *packageManagerDetector
+	reuseMarkers        map[plumbing.Hash]bool
 }
 
 type secretCacheKey struct {
@@ -91,13 +97,15 @@ func newLocalDetectors(ctx context.Context, repo *githistory.Repo) (*localDetect
 	}
 	knowledge = signalKnowledgeBase(knowledge)
 	detectors := &localDetectors{
-		repo:            repo,
-		knowledge:       knowledge,
-		secretScanner:   secretScanner,
-		secretCache:     make(map[secretCacheKey][]Signal),
-		packageCache:    make(map[packageCacheKey][]Signal),
-		packageManagers: packageManagers,
-		reuseMarkers:    make(map[plumbing.Hash]bool),
+		repo:                repo,
+		knowledge:           knowledge,
+		secretScanner:       secretScanner,
+		secretCache:         make(map[secretCacheKey][]Signal),
+		packageCache:        make(map[packageCacheKey][]Signal),
+		repositoryFileCache: make(map[repositoryFileCacheKey][]Signal),
+		workflowCache:       make(map[workflowCacheKey][]Signal),
+		packageManagers:     packageManagers,
+		reuseMarkers:        make(map[plumbing.Hash]bool),
 	}
 	detectors.briefImpact = newBriefImpactReport(knowledge)
 	return detectors, nil
@@ -147,6 +155,10 @@ func (d *localDetectors) detect(
 	dependencyUpdateRun := dependencyUpdateFull || dependencyUpdateConfigAffected(changedPaths(changes))
 	packageFull := forceFull || parent.errors[detectorPackages] != ""
 	packageRun := packageFull || packagesAffected(changes)
+	repositoryFileFull := forceFull || parent.errors[detectorRepositoryFiles] != ""
+	repositoryFileRun := repositoryFileFull || len(changes) > 0
+	workflowFull := forceFull || parent.errors[detectorWorkflows] != ""
+	workflowRun := workflowFull || workflowsAffected(changes)
 	managerDirectories, managerImpactErr := d.packageManagers.directoriesForChanges(changes)
 	managerFull := forceFull || parent.errors[detectorPackageManagers] != ""
 	managerRun := managerFull || managerImpactErr != nil || len(managerDirectories) > 0
@@ -162,7 +174,7 @@ func (d *localDetectors) detect(
 	reuseRun := reuseFull || parent.reuseActive && len(changes) > 0
 
 	var tree fs.FS
-	if briefRun || dependencyUpdateRun || packageRun || managerRun || reuseRun {
+	if anyDetectorRuns(briefRun, dependencyUpdateRun, packageRun, repositoryFileRun, workflowRun, managerRun, reuseRun) {
 		var err error
 		tree, err = d.repo.TreeFS(commit.Hash)
 		if err != nil {
@@ -173,6 +185,8 @@ func (d *localDetectors) detect(
 	d.runBrief(tree, briefPaths, briefRun, briefFull, &current, stats)
 	d.runDependencyUpdateConfigs(tree, dependencyUpdateRun, dependencyUpdateFull, &current, stats)
 	d.runPackages(tree, changes, packageRun, packageFull, &current, stats)
+	d.runRepositoryFiles(tree, changes, repositoryFileRun, repositoryFileFull, &current, stats)
+	d.runWorkflows(tree, changes, workflowRun, workflowFull, &current, stats)
 	d.runPackageManagers(
 		tree,
 		managerDirectories,
@@ -185,6 +199,15 @@ func (d *localDetectors) detect(
 	d.runSecrets(ctx, commit, changes, secretFull, &current, stats)
 	d.runREUSE(tree, changes, reuseRun, reuseFull, &current, stats)
 	return current, nil
+}
+
+func anyDetectorRuns(runs ...bool) bool {
+	for _, run := range runs {
+		if run {
+			return true
+		}
+	}
+	return false
 }
 
 func (d *localDetectors) runPackageManagers(
@@ -292,6 +315,7 @@ func (d *localDetectors) runDependencyUpdateConfigs(
 	}
 	delete(current.errors, checkDependencyUpdateConfig)
 	removeCheckSignals(current.signals, checkDependencyUpdateConfig)
+	removeCheckSignals(current.signals, checkDependencyUpdateTool)
 	addSignals(current.signals, signals)
 }
 
@@ -500,7 +524,7 @@ func briefSignalType(
 	case name == "SOPS":
 		return checkSecretsManagement, name, "", true
 	case category == "security":
-		kind = "tool"
+		kind = signalKindTool
 		if taxonomy != nil && len(taxonomy.Function) > 0 {
 			kind = taxonomy.Function[0]
 		}

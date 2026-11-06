@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -130,11 +129,8 @@ type scanStats struct {
 func newScanStats(cache *blobCache) *scanStats {
 	stats := &scanStats{
 		started:   time.Now(),
-		detectors: make(map[string]*detectorStats, len(scorecardDetectors)),
+		detectors: make(map[string]*detectorStats, len(localDetectorNames)),
 		cache:     cache,
-	}
-	for _, detector := range scorecardDetectors {
-		stats.detectors[detector.name] = &detectorStats{}
 	}
 	for _, name := range localDetectorNames {
 		stats.detectors[name] = &detectorStats{}
@@ -219,17 +215,13 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err err
 		err = errors.Join(err, local.Close())
 	}()
 
-	uri, err := filepath.Abs(path)
-	if err != nil {
-		return err
-	}
 	cache := newBlobCache(repo.Repository())
 	stats := newScanStats(cache)
 	walk, states, err := planCommitWalk(repo, opts)
 	if err != nil {
 		return err
 	}
-	snapshots, err := newSnapshotCollector(repo, local, "file://"+uri, opts, cache, stats)
+	snapshots, err := newSnapshotCollector(repo, local, opts, cache, stats)
 	if err != nil {
 		return err
 	}
@@ -249,7 +241,7 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err err
 				if err != nil {
 					return err
 				}
-				parent, err = detectFullCommitState("file://"+uri, parentCommit, local, cache, stats)
+				parent, err = detectFullCommitState(parentCommit, local, cache, stats)
 				if err != nil {
 					return err
 				}
@@ -259,7 +251,6 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err err
 		}
 
 		current, err := detectCommitState(
-			"file://"+uri,
 			commit.Object,
 			parent,
 			commit.Changes,
@@ -309,7 +300,7 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err err
 func loadBoundarySnapshot(
 	repo *git.Repository,
 	local *localDetectors,
-	uri, ref, boundary, date string,
+	ref, boundary, date string,
 	cache *blobCache,
 	stats *scanStats,
 ) (boundarySnapshot, error) {
@@ -326,7 +317,7 @@ func loadBoundarySnapshot(
 		return snapshot, nil
 	}
 	snapshot.commit = commit
-	snapshot.state, err = detectFullCommitState(uri, commit, local, cache, stats)
+	snapshot.state, err = detectFullCommitState(commit, local, cache, stats)
 	if err != nil {
 		return boundarySnapshot{}, err
 	}
@@ -538,17 +529,15 @@ func changeName(marker byte) string {
 }
 
 func detectFullCommitState(
-	uri string,
 	commit *object.Commit,
 	local *localDetectors,
 	cache *blobCache,
 	stats *scanStats,
 ) (commitState, error) {
-	return detectCommitState(uri, commit, emptyCommitState(), nil, true, local, cache, stats)
+	return detectCommitState(commit, emptyCommitState(), nil, true, local, cache, stats)
 }
 
 func detectCommitState(
-	uri string,
 	commit *object.Commit,
 	parent commitState,
 	changes []githistory.Change,
@@ -565,74 +554,8 @@ func detectCommitState(
 		return commitState{}, err
 	}
 	current.languages = languages
-	programmingLanguages := current.languages.scorecard()
 	languagesChanged := !parent.languages.sameLanguages(current.languages)
-	paths := changedPaths(changes)
-	var fullClient *commitClient
-
-	for _, detector := range scorecardDetectors {
-		detectorStats := stats.detectors[detector.name]
-		scope := detector.scope(paths, forceFull)
-		if detector.name == checkFuzzing && languagesChanged {
-			scope = detectionScope{impact: impactFull}
-		}
-		if _, failed := parent.errors[detector.name]; failed && scope.impact != impactNone {
-			scope = detectionScope{impact: impactFull}
-		}
-		if scope.impact == impactNone {
-			detectorStats.skipped++
-			continue
-		}
-
-		var client *commitClient
-		var err error
-		include := includeForDetector(detector, cache)
-		switch scope.impact {
-		case impactFull:
-			detectorStats.full++
-			if include != nil {
-				client, err = newCommitClient(uri, commit, cache, nil, include, programmingLanguages)
-			} else {
-				if fullClient == nil {
-					fullClient, err = newCommitClient(uri, commit, cache, nil, nil, programmingLanguages)
-				}
-				client = fullClient
-			}
-		case impactPartial:
-			detectorStats.partial++
-			client, err = newCommitClient(uri, commit, cache, scope.paths, include, programmingLanguages)
-		}
-		if err != nil {
-			return commitState{}, err
-		}
-
-		started := time.Now()
-		signals, err := detector.detect(context.Background(), client)
-		detectorStats.duration += time.Since(started)
-		detectorStats.runs++
-		if err != nil {
-			current.errors[detector.name] = err.Error()
-			continue
-		}
-
-		delete(current.errors, detector.name)
-		if scope.impact == impactFull {
-			removeCheckSignals(current.signals, detector.name)
-		} else {
-			removePathSignals(current.signals, detector.name, scope.paths)
-		}
-		for _, signal := range signals {
-			current.signals[signalKey(signal)] = signal
-		}
-	}
 	return local.detect(context.Background(), commit, current, changes, forceFull, languagesChanged, stats)
-}
-
-func includeForDetector(detector detector, cache *blobCache) func(string) bool {
-	if detector.name == checkFuzzing {
-		return cache.includeFuzzingPath
-	}
-	return detector.include
 }
 
 func emptyCommitState() commitState {
@@ -694,25 +617,11 @@ func printStats(writer io.Writer, stats *scanStats) error {
 		len(stats.cache.data), stats.cache.requests, stats.cache.hits, stats.cache.bytes); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(writer, "signals: Languages paths=%d analyzed=%d time=%s\n",
+	if _, err := fmt.Fprintf(writer, "signals: Languages paths=%d time=%s\n",
 		len(stats.cache.languagePaths),
-		len(stats.cache.languageBlobs),
 		stats.languages.Round(time.Millisecond),
 	); err != nil {
 		return err
-	}
-	for _, detector := range scorecardDetectors {
-		result := stats.detectors[detector.name]
-		if _, err := fmt.Fprintf(writer, "signals: %-24s runs=%d full=%d partial=%d skipped=%d time=%s\n",
-			detector.name,
-			result.runs,
-			result.full,
-			result.partial,
-			result.skipped,
-			result.duration.Round(time.Millisecond),
-		); err != nil {
-			return err
-		}
 	}
 	for _, name := range localDetectorNames {
 		result := stats.detectors[name]
