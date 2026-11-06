@@ -1,6 +1,6 @@
 # signals
 
-A command for tracing security-relevant evidence stored in Git across repository history. It shows when detected evidence appears, changes, or disappears, with the commit and path behind each change. `signals` walks commit trees with [`github.com/git-pkgs/history`](https://github.com/git-pkgs/history). It combines ten raw detectors from OpenSSF Scorecard v5.6.0 with git-pkgs modules that detect CI and security tools, secrets, REUSE metadata, package managers, manifests, lockfiles, dependency pinning, and update configuration. Commit data adds dependency-bot and signature events plus contributor, maintenance, review, and signing metrics. The output contains the evidence and its provenance without calculating a score. The scan reads local Git objects, with forge APIs, release APIs, credential validation, and external services disabled.
+A command for tracing security-relevant evidence stored in Git across repository history. It shows when detected evidence appears, changes, or disappears, with the commit and path behind each change. `signals` walks commit trees with [`github.com/git-pkgs/history`](https://github.com/git-pkgs/history). It combines nine raw detectors from OpenSSF Scorecard v5.6.0 with git-pkgs modules that detect CI and security tools, secrets, REUSE metadata, package managers, manifests, lockfiles, dependency pinning, and update configuration. Commit data adds dependency-bot and signature events plus contributor, maintenance, review, and signing metrics. The output contains the evidence and its provenance without calculating a score. The scan reads local Git objects, with forge APIs, release APIs, credential validation, and external services disabled.
 
 The local-only timeline answers questions about when repository evidence changed. Examples include:
 
@@ -83,13 +83,13 @@ Each block names a commit where the detected state changed or commit-local evide
 
 ```text
 15dfa527561f  2016-12-18  Add support for Docker Compose development environment
-  + Pinned-Dependencies/containerImage ruby at Dockerfile:1 = unpinned
+  + Pinned-Dependencies/containerImage ruby at Dockerfile = unpinned
 
 62308ad45a2d  2026-02-10  build(deps): Bump actions/checkout from 6.0.1 to 6.0.2
   * Dependency-Update-Tool/commit Dependabot
   * Signed-Commit/openpgp
-  + Pinned-Dependencies/GitHubAction actions/checkout at .github/workflows/release.yml:20 = pinned@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-  - Pinned-Dependencies/GitHubAction actions/checkout at .github/workflows/release.yml:20 = pinned@8e8c483db84b4bee98b60c0593521ed34d9990e8
+  + Pinned-Dependencies/GitHubAction actions/checkout at .github/workflows/release.yml = pinned@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+  - Pinned-Dependencies/GitHubAction actions/checkout at .github/workflows/release.yml = pinned@8e8c483db84b4bee98b60c0593521ed34d9990e8
 ```
 
 Non-merge commits are compared with their first parent. Merge snapshots are scanned and cached so later commits inherit the right state. Merge commits omit tree-state changes but can produce commit events.
@@ -99,7 +99,7 @@ Non-merge commits are compared with their first parent. Merge snapshots are scan
 `--jsonl` writes structured change and event records. Each record contains the full commit hash, author and committer identities and timestamps, and subject:
 
 ```json
-{"type":"change","commit":"cb52a20b85fc2af8f7e6db0bc2cac843735eff49","author":{"name":"dependabot[bot]","email":"49699333+dependabot[bot]@users.noreply.github.com"},"committer":{"name":"GitHub","email":"noreply@github.com"},"authored_at":"2026-09-07T23:55:23Z","committed_at":"2026-09-08T00:02:11Z","subject":"build(deps): Bump zizmorcore/zizmor-action from 0.6.2 to 0.6.3","changes":[{"change":"added","check":"Pinned-Dependencies","kind":"GitHubAction","name":"zizmorcore/zizmor-action","value":"pinned@70fb788f84895a7701f5643d103d587e460b5c99","path":".github/workflows/zizmor.yml","line":30},{"change":"removed","check":"Pinned-Dependencies","kind":"GitHubAction","name":"zizmorcore/zizmor-action","value":"pinned@3dc1ecc9bcb9e94e9b2c709687979e1298497054","path":".github/workflows/zizmor.yml","line":30}]}
+{"type":"change","commit":"cb52a20b85fc2af8f7e6db0bc2cac843735eff49","author":{"name":"dependabot[bot]","email":"49699333+dependabot[bot]@users.noreply.github.com"},"committer":{"name":"GitHub","email":"noreply@github.com"},"authored_at":"2026-09-07T23:55:23Z","committed_at":"2026-09-08T00:02:11Z","subject":"build(deps): Bump zizmorcore/zizmor-action from 0.6.2 to 0.6.3","changes":[{"change":"added","check":"Pinned-Dependencies","kind":"GitHubAction","name":"zizmorcore/zizmor-action","value":"pinned@70fb788f84895a7701f5643d103d587e460b5c99","path":".github/workflows/zizmor.yml"},{"change":"removed","check":"Pinned-Dependencies","kind":"GitHubAction","name":"zizmorcore/zizmor-action","value":"pinned@3dc1ecc9bcb9e94e9b2c709687979e1298497054","path":".github/workflows/zizmor.yml"}]}
 {"type":"event","commit":"cb52a20b85fc2af8f7e6db0bc2cac843735eff49","author":{"name":"dependabot[bot]","email":"49699333+dependabot[bot]@users.noreply.github.com"},"committer":{"name":"GitHub","email":"noreply@github.com"},"authored_at":"2026-09-07T23:55:23Z","committed_at":"2026-09-08T00:02:11Z","subject":"build(deps): Bump zizmorcore/zizmor-action from 0.6.2 to 0.6.3","events":[{"check":"Dependency-Update-Tool","kind":"commit","name":"Dependabot"},{"check":"Signed-Commit","kind":"openpgp"}]}
 ```
 
@@ -111,7 +111,7 @@ Snapshot metrics use the preceding 90 days. They report non-bot contributor and 
 
 ## Detected signals
 
-The command runs ten Scorecard checks. Several retain the repository-backed part of a check because Scorecard combines local files with remote evidence.
+The command runs nine Scorecard checks. Several retain the repository-backed part of a check because Scorecard combines local files with remote evidence.
 
 | Check | Local evidence | Remote evidence omitted |
 | --- | --- | --- |
@@ -120,7 +120,6 @@ The command runs ten Scorecard checks. Several retain the repository-backed part
 | Dependency-Update-Tool | Dependabot, Renovate, and Scala Steward configuration | Dependabot-authored commit search |
 | Fuzzing | ClusterFuzzLite configuration and source patterns selected by the languages in each commit | OSS-Fuzz membership |
 | License | Root license filename detection | Forge license classification |
-| Pinned-Dependencies | Actions, container images, shell downloads, Dockerfiles, workflow scripts, and NuGet configuration | None |
 | SAST | Known Actions and Sonar configuration in `pom.xml` | Successful check runs |
 | SBOM | Root source SBOM filenames | Release assets |
 | Security-Policy | Policy files and their contact or disclosure text | Inherited policy from the organization `.github` repository |
@@ -140,20 +139,22 @@ The additional detectors use the same persistent signal model:
 | Dependency-Update-Config | Dependabot and Renovate configuration, including package managers, directories, schedules, cooldowns, groups, and semantic configuration changes |
 | Package-Manager | The selected package manager for each detected package ecosystem and project directory |
 | Package-File | Manifest and lockfile presence, including files recognized by package-manager definitions before dependency parsing is available |
+| Dependency-Constraint | Ranged, unparsed, and unversioned direct dependency constraints as written in parsed manifests |
 | Dependency-Pin | Exact direct dependency constraints found in parsed manifests |
 | Dependency-Pinning | Exact, ranged, unparsed, and resolved dependency counts from manifests and lockfiles |
 | Lockfile-Integrity | Dependencies with declared integrity metadata compared with the total entries in a lockfile |
+| Pinned-Dependencies | Repository-based `uses` steps pinned to commit hashes and container images pinned to SHA-256 digests, parsed from changed workflows, Dockerfiles, and Compose files |
 | Package-Parse | Package files that were identified but could not be parsed |
 | Secret | Findings from the embedded `git-pkgs/secrets` rule corpus; output contains `[redacted]` in place of the credential |
 | REUSE | Per-file SPDX license declarations, REUSE.toml or DEP5 metadata, and the number of non-empty covered files with both license and copyright information |
 
 ## History scanning
 
-The root commit receives a full scan. Later commits reuse their first parent's signal state and rerun a detector only when relevant paths change. Checks with cross-file behavior, including License, SBOM, Security-Policy, dependency-update configuration, and NuGet pinning, receive a full commit tree when one of their inputs changes.
+The root commit receives a full scan. Later commits reuse their first parent's signal state and rerun a detector only when relevant paths change. Checks with cross-file behavior, including License, SBOM, Security-Policy, and dependency-update configuration, receive a full commit tree when one of their inputs changes.
 
 File content is cached by Git blob OID for the whole run. Unchanged bytes are read once even when they appear in many commits or several detectors request them. Commit reading can run concurrently, while signal-state updates remain ordered. Fuzzing keeps a language inventory for each commit using `github.com/git-pkgs/languages`. Unambiguous extensions need no content read; ambiguous extensions use a cached 4 KB prefix. `github.com/git-pkgs/roles` removes vendored, generated, fixture, cache, and build-output paths from that inventory and from the files scanned for fuzzing patterns. Test paths remain eligible because fuzz targets commonly use them.
 
-Brief reads commit trees through `history.TreeFS` and reruns only when Brief's changed-file filter identifies an input to one of the emitted tool signals. Package files are parsed when their paths change, while package-manager detection uses `managers.AffectedDirectories` to rescan only the affected projects. Secret scanning updates changed paths and caches results by blob OID and path because some rules depend on the filename. REUSE metadata changes trigger a full REUSE scan; ordinary changes update the affected file state and coverage count.
+Brief reads commit trees through `history.TreeFS` and reruns only when Brief's changed-file filter identifies an input to one of the emitted tool signals. Package files are parsed when their paths change, and the parse result supplies dependency constraints, pins, Actions references, container images, lockfile resolution, and integrity records. Results are cached by blob OID and path. Shell commands that download or install packages are not yet included in this local package detector. Package-manager detection uses `managers.AffectedDirectories` to rescan only the affected projects. Secret scanning updates changed paths and caches results by blob OID and path because some rules depend on the filename. REUSE metadata changes trigger a full REUSE scan; ordinary changes update the affected file state and coverage count.
 
 ## Related git-pkgs modules
 
@@ -170,7 +171,7 @@ The Scorecard dependency brings a large set of transitive packages and repeatedl
 - [`github.com/git-pkgs/roles`](https://github.com/git-pkgs/roles) classifies CI, fuzz, legal, generated, vendored, and packaging paths.
 - [`github.com/git-pkgs/secrets`](https://github.com/git-pkgs/secrets) scans changed blob content with its embedded local rule corpus.
 
-A shared Actions workflow parser could remove the largest duplication outside Pinned-Dependencies. One parsed workflow could feed Dangerous-Workflow, action pinning, SAST, Token-Permissions, Packaging, and Gradle wrapper validation.
+A shared Actions workflow parser could remove the largest remaining duplication. One parsed workflow could feed Dangerous-Workflow, reusable-workflow and script pinning, SAST, Token-Permissions, Packaging, and Gradle wrapper validation.
 
 ## Development
 

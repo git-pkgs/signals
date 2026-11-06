@@ -58,8 +58,9 @@ jobs:
 	for _, expected := range []string{
 		"Add security configuration",
 		"+ Dependency-Update-Tool/tool Dependabot at .github/dependabot.yml:1",
+		"+ Dependency-Constraint/github-actions pkg:githubactions/actions/checkout at .github/workflows/ci.yml = v4",
 		"+ Dangerous-Workflow/scriptInjection",
-		"+ Pinned-Dependencies/GitHubAction actions/checkout",
+		"+ Pinned-Dependencies/GitHubAction actions/checkout at .github/workflows/ci.yml = unpinned",
 		"+ Security-Policy/policy at SECURITY.md:1",
 		"+ Token-Permissions/topLevel",
 		"Remove security policy",
@@ -310,12 +311,15 @@ func TestLogComparesBranchCommitsWithTheirFirstParent(t *testing.T) {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 
-	const signal = "Pinned-Dependencies/containerImage ruby at Dockerfile:1 = unpinned"
+	const signal = "Pinned-Dependencies/containerImage ruby at Dockerfile = unpinned"
 	if count := strings.Count(stdout.String(), "+ "+signal); count != 1 {
 		t.Fatalf("added signal count = %d, want 1:\n%s", count, stdout.String())
 	}
 	if strings.Contains(stdout.String(), "- "+signal) {
 		t.Fatalf("branch traversal produced a false removal:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "+ Dependency-Constraint/docker pkg:docker/ruby at Dockerfile = 3.4") {
+		t.Fatalf("container constraint missing:\n%s", stdout.String())
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("unexpected detection errors:\n%s", stderr.String())
