@@ -98,11 +98,12 @@ type boundarySnapshot struct {
 }
 
 type commitState struct {
-	signals     map[string]Signal
-	errors      map[string]string
-	languages   languageInventory
-	reuseFiles  map[string]reuseFile
-	reuseActive bool
+	signals        map[string]Signal
+	errors         map[string]string
+	languages      languageInventory
+	briefLanguages []string
+	reuseFiles     map[string]reuseFile
+	reuseActive    bool
 }
 
 type commitStateStore struct {
@@ -645,11 +646,12 @@ func emptyCommitState() commitState {
 
 func cloneCommitState(state commitState) commitState {
 	clone := commitState{
-		signals:     make(map[string]Signal, len(state.signals)),
-		errors:      make(map[string]string, len(state.errors)),
-		languages:   state.languages,
-		reuseFiles:  state.reuseFiles,
-		reuseActive: state.reuseActive,
+		signals:        make(map[string]Signal, len(state.signals)),
+		errors:         make(map[string]string, len(state.errors)),
+		languages:      state.languages,
+		briefLanguages: append([]string(nil), state.briefLanguages...),
+		reuseFiles:     state.reuseFiles,
+		reuseActive:    state.reuseActive,
 	}
 	for key, signal := range state.signals {
 		clone.signals[key] = signal

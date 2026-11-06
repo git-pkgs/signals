@@ -139,8 +139,10 @@ func (d *localDetectors) detect(
 	stats *scanStats,
 ) (commitState, error) {
 	current := cloneCommitState(parent)
-	briefFull := forceFull || parent.errors[detectorBrief] != ""
-	briefRun := briefFull || d.briefAffected(changes, languagesChanged)
+	briefPaths := briefChangedPaths(changes)
+	briefFull := forceFull || parent.errors[detectorBrief] != "" ||
+		d.briefLanguagesMayChange(changes, briefPaths, parent.briefLanguages, languagesChanged)
+	briefRun := briefFull || len(briefPaths) > 0
 	dependencyUpdateFull := forceFull || parent.errors[checkDependencyUpdateConfig] != ""
 	dependencyUpdateRun := dependencyUpdateFull || dependencyUpdateConfigAffected(changedPaths(changes))
 	packageFull := forceFull || parent.errors[detectorPackages] != ""
@@ -168,7 +170,7 @@ func (d *localDetectors) detect(
 		}
 	}
 
-	d.runBrief(tree, briefRun, briefFull, &current, stats)
+	d.runBrief(tree, briefPaths, briefRun, briefFull, &current, stats)
 	d.runDependencyUpdateConfigs(tree, dependencyUpdateRun, dependencyUpdateFull, &current, stats)
 	d.runPackages(tree, changes, packageRun, packageFull, &current, stats)
 	d.runPackageManagers(
@@ -295,6 +297,7 @@ func (d *localDetectors) runDependencyUpdateConfigs(
 
 func (d *localDetectors) runBrief(
 	tree fs.FS,
+	changedPaths []string,
 	run, forceFull bool,
 	current *commitState,
 	stats *scanStats,
@@ -306,24 +309,60 @@ func (d *localDetectors) runBrief(
 	}
 	recordDetectorRun(detectorStats, forceFull)
 	started := time.Now()
-	signals, err := d.briefSignals(tree)
+	var signals []Signal
+	var checked []briefdetect.ToolRef
+	var languages []string
+	var err error
+	if forceFull {
+		signals, languages, err = d.briefSignals(tree)
+	} else {
+		signals, checked, err = d.briefChangedSignals(tree, changedPaths, current.briefLanguages)
+	}
 	detectorStats.duration += time.Since(started)
 	if err != nil {
 		current.errors[detectorBrief] = err.Error()
 		return
 	}
 	delete(current.errors, detectorBrief)
-	removeBriefSignals(current.signals)
+	if forceFull {
+		removeBriefSignals(current.signals)
+		current.briefLanguages = languages
+	} else {
+		d.removeBriefToolSignals(current.signals, checked)
+	}
 	addSignals(current.signals, signals)
 }
 
-func (d *localDetectors) briefSignals(tree fs.FS) ([]Signal, error) {
+func (d *localDetectors) briefSignals(tree fs.FS) ([]Signal, []string, error) {
 	report, err := briefdetect.NewFS(d.knowledge, tree).Run()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	languages := make([]string, 0, len(report.Languages))
+	for _, language := range report.Languages {
+		languages = append(languages, language.Name)
+	}
+	sort.Strings(languages)
+	return briefToolSignals(report.Tools), languages, nil
+}
+
+func (d *localDetectors) briefChangedSignals(
+	tree fs.FS,
+	changedPaths, languages []string,
+) ([]Signal, []briefdetect.ToolRef, error) {
+	scan, err := briefdetect.NewFS(d.knowledge, tree).RunTools(briefdetect.ToolScanOptions{
+		ChangedFiles: changedPaths,
+		Languages:    languages,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return briefToolSignals(scan.Tools), scan.Checked, nil
+}
+
+func briefToolSignals(tools map[string][]gitbrief.Detection) []Signal {
 	var signals []Signal
-	for _, detections := range report.Tools {
+	for _, detections := range tools {
 		for _, detection := range detections {
 			check, kind, name, ok := briefSignalType(detection.Name, detection.Category, detection.Taxonomy)
 			if !ok {
@@ -343,13 +382,10 @@ func (d *localDetectors) briefSignals(tree fs.FS) ([]Signal, error) {
 		}
 	}
 	sortSignals(signals)
-	return deduplicateSignals(signals), nil
+	return deduplicateSignals(signals)
 }
 
-func (d *localDetectors) briefAffected(changes []githistory.Change, languagesChanged bool) bool {
-	if len(changes) == 0 {
-		return false
-	}
+func briefChangedPaths(changes []githistory.Change) []string {
 	paths := make([]string, 0, len(changes))
 	for _, change := range changes {
 		labels, err := roles.Match(change.Path)
@@ -359,16 +395,50 @@ func (d *localDetectors) briefAffected(changes []githistory.Change, languagesCha
 		}
 		paths = append(paths, change.Path)
 	}
+	return paths
+}
+
+func (d *localDetectors) briefLanguagesMayChange(
+	changes []githistory.Change,
+	paths, current []string,
+	languagesChanged bool,
+) bool {
 	if len(paths) == 0 {
 		return false
 	}
 	filtered := briefdetect.FilterByChangedFiles(d.briefImpact, d.knowledge, paths)
-	for _, detections := range filtered.Tools {
-		if len(detections) > 0 {
-			return true
+	if len(filtered.Languages) == 0 {
+		return false
+	}
+	if languagesChanged {
+		return true
+	}
+
+	known := make(map[string]bool, len(current))
+	for _, language := range current {
+		known[language] = true
+	}
+	included := make(map[string]bool, len(paths))
+	for _, changedPath := range paths {
+		included[changedPath] = true
+	}
+	for _, change := range changes {
+		if !included[change.Path] {
+			continue
+		}
+		added := nonzeroOID(change.OldOID) == "" && nonzeroOID(change.NewOID) != ""
+		removed := nonzeroOID(change.OldOID) != "" && nonzeroOID(change.NewOID) == ""
+		if !added && !removed {
+			continue
+		}
+		matched := briefdetect.FilterByChangedFiles(d.briefImpact, d.knowledge, []string{change.Path})
+		for _, language := range matched.Languages {
+			if (added && !known[language.Name]) || (removed && known[language.Name]) {
+				return true
+			}
 		}
 	}
-	return languagesChanged && len(filtered.Languages) > 0
+	return false
 }
 
 func newBriefImpactReport(knowledge *kb.KnowledgeBase) *gitbrief.Report {
@@ -449,6 +519,29 @@ func removeBriefSignals(signals map[string]Signal) {
 			delete(signals, key)
 		}
 	}
+}
+
+func (d *localDetectors) removeBriefToolSignals(signals map[string]Signal, checked []briefdetect.ToolRef) {
+	selected := make(map[string]bool, len(checked))
+	for _, ref := range checked {
+		tool := d.knowledge.ByName[ref.Name]
+		if tool == nil || tool.Tool.Category != ref.Category {
+			continue
+		}
+		check, kind, name, ok := briefSignalType(ref.Name, ref.Category, taxonomyFromTool(tool))
+		if ok {
+			selected[briefSignalIdentity(check, kind, name)] = true
+		}
+	}
+	for key, signal := range signals {
+		if selected[briefSignalIdentity(signal.Check, signal.Kind, signal.Name)] {
+			delete(signals, key)
+		}
+	}
+}
+
+func briefSignalIdentity(check, kind, name string) string {
+	return check + "\x00" + kind + "\x00" + name
 }
 
 func (d *localDetectors) runSecrets(

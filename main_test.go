@@ -30,7 +30,7 @@ func TestLogDetectsSignalChangesAcrossHistory(t *testing.T) {
 
 	writeFile(t, repo, ".github/dependabot.yml", "version: 2\nupdates: []\n")
 	writeFile(t, repo, "SECURITY.md", "Report vulnerabilities to security@example.com.\n")
-	writeFile(t, repo, ".github/workflows/ci.yml", `name: CI
+	writeFile(t, repo, testWorkflowPath, `name: CI
 on: [push]
 permissions: write-all
 jobs:
@@ -369,9 +369,9 @@ func TestLogDetectsLocalToolingSecretsAndREUSEAcrossHistory(t *testing.T) {
 	gitRun(t, repo, "commit", "-m", "Initial commit")
 
 	const token = "ghp_" + "16C7e42F292c6912E7710c838347Ae178B4a"
-	writeFile(t, repo, ".github/workflows/ci.yml", "name: CI\non: push\njobs: {}\n")
+	writeFile(t, repo, testWorkflowPath, "name: CI\non: push\njobs: {}\n")
 	writeFile(t, repo, ".pre-commit-config.yaml", "repos: []\n")
-	writeFile(t, repo, ".semgrep.yml", "rules: []\n")
+	writeFile(t, repo, testSemgrepConfigPath, "rules: []\n")
 	writeFile(t, repo, ".sops.yaml", "creation_rules: []\n")
 	writeFile(t, repo, "Makefile", "all:\n\t@true\n")
 	writeFile(t, repo, "config.yml", "token: "+token+"\n")
@@ -382,9 +382,9 @@ func TestLogDetectsLocalToolingSecretsAndREUSEAcrossHistory(t *testing.T) {
 	gitRun(t, repo, "commit", "-m", "Add local security evidence")
 
 	for _, name := range []string{
-		".github/workflows/ci.yml",
+		testWorkflowPath,
 		".pre-commit-config.yaml",
-		".semgrep.yml",
+		testSemgrepConfigPath,
 		".sops.yaml",
 		"config.yml",
 	} {
@@ -419,7 +419,7 @@ func TestLogDetectsLocalToolingSecretsAndREUSEAcrossHistory(t *testing.T) {
 		{Change: "added", Check: checkCI, Kind: "GitHub Actions", Path: ".github/workflows/"},
 		{Change: "added", Check: checkPreCommit, Kind: "pre-commit", Path: ".pre-commit-config.yaml"},
 		{Change: "added", Check: checkSecretsManagement, Kind: "SOPS", Path: ".sops.yaml"},
-		{Change: "added", Check: checkSecurityTool, Kind: "security-scanning", Name: "Semgrep", Path: ".semgrep.yml"},
+		{Change: "added", Check: checkSecurityTool, Kind: testSecurityScanKind, Name: testSemgrepName, Path: testSemgrepConfigPath},
 		{Change: "added", Check: checkBuild, Kind: "Make"},
 		{Change: "added", Check: checkSecret, Kind: "github-pat", Value: "[redacted]", Path: "config.yml", Line: 1},
 		{Change: "added", Check: checkREUSE, Kind: "declaration", Value: "MIT", Path: "licensed.txt"},
@@ -436,6 +436,11 @@ func TestLogDetectsLocalToolingSecretsAndREUSEAcrossHistory(t *testing.T) {
 		expected.Change = "removed"
 		if !containsExactJSONLChange(removed.Changes, expected) {
 			t.Errorf("removed record missing %#v:\n%s", expected, stdout.String())
+		}
+	}
+	for _, change := range removed.Changes {
+		if change.Check == checkBuild {
+			t.Errorf("unchanged build signal was removed: %#v\n%s", change, stdout.String())
 		}
 	}
 	if stderr.Len() != 0 {
