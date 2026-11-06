@@ -220,7 +220,7 @@ func classifyDependencyPin(version, ecosystem string) (string, bool, bool) {
 	}
 	switch ecosystem {
 	case "github-actions":
-		return version, len(version) >= 40 && isHex(version), true
+		return version, len(version) == 40 && isHex(version), true
 	case "docker":
 		digest, ok := strings.CutPrefix(version, "sha256:")
 		return version, ok && len(digest) == 64 && isHex(digest), true

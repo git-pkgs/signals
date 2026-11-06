@@ -18,6 +18,7 @@ import (
 )
 
 func TestLogDetectsSignalChangesAcrossHistory(t *testing.T) {
+	longHexActionRef := strings.Repeat("a", 41)
 	repo := t.TempDir()
 	gitRun(t, repo, "init", "-b", "main")
 	gitRun(t, repo, "config", "user.name", "Signals Test")
@@ -38,6 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: example/action@`+longHexActionRef+`
       - run: echo "${{ github.event.issue.title }}"
 `)
 	gitRun(t, repo, "add", ".")
@@ -59,8 +61,10 @@ jobs:
 		"Add security configuration",
 		"+ Dependency-Update-Tool/tool Dependabot at .github/dependabot.yml:1",
 		"+ Dependency-Constraint/github-actions pkg:githubactions/actions/checkout at .github/workflows/ci.yml = v4",
+		"+ Dependency-Constraint/github-actions pkg:githubactions/example/action at .github/workflows/ci.yml = " + longHexActionRef,
 		"+ Dangerous-Workflow/scriptInjection",
 		"+ Pinned-Dependencies/GitHubAction actions/checkout at .github/workflows/ci.yml = unpinned",
+		"+ Pinned-Dependencies/GitHubAction example/action at .github/workflows/ci.yml = unpinned",
 		"+ Security-Policy/policy at SECURITY.md:1",
 		"+ Token-Permissions/topLevel",
 		"Remove security policy",

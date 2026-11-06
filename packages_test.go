@@ -69,6 +69,26 @@ func TestPackageFileSignalsClassifiesGitHubActionPins(t *testing.T) {
 	}
 }
 
+func TestClassifyDependencyPinRequiresFullGitHubCommitSHA(t *testing.T) {
+	tests := []struct {
+		name    string
+		version string
+		pinned  bool
+	}{
+		{name: "short SHA", version: strings.Repeat("a", 39)},
+		{name: "full SHA", version: strings.Repeat("a", 40), pinned: true},
+		{name: "long hexadecimal ref", version: strings.Repeat("a", 41)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			version, pinned, classified := classifyDependencyPin(tt.version, "github-actions")
+			if version != tt.version || pinned != tt.pinned || !classified {
+				t.Fatalf("classifyDependencyPin() = %q, %t, %t", version, pinned, classified)
+			}
+		})
+	}
+}
+
 func TestPackageFileSignalsClassifiesContainerDigests(t *testing.T) {
 	const digest = "sha256:9cb31e2e37ea84c54fd72af82d7d454d24f714bd7ee2b7eb350f3231b3e1f5a0"
 	signals := packageFileSignals("Dockerfile", []byte("FROM ruby:3.4\nFROM alpine@"+digest+"\n"))
