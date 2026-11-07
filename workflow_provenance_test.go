@@ -63,6 +63,18 @@ jobs:
       id-token: write
     steps:
       - run: uv publish --token ${{ secrets.PYPI_TOKEN }} dist/*
+  pypi-short-token:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - run: uv publish -t ${{ secrets.PYPI_TOKEN }} dist/*
+  pypi-attached-token:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - run: uv publish -t${{ secrets.PYPI_TOKEN }} dist/*
   pypi-disabled:
     runs-on: ubuntu-latest
     permissions:

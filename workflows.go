@@ -138,7 +138,7 @@ func workflowFileSignals(path string, data []byte) ([]Signal, error) {
 	signals := dangerousWorkflowSignals(path, workflow)
 	signals = append(signals, tokenPermissionSignals(path, workflow)...)
 	signals = append(signals, sastWorkflowSignals(path, workflow)...)
-	signals = append(signals, workflowObservationSignals(path, workflow)...)
+	signals = append(signals, workflowObservationSignals(path, data, workflow)...)
 	sortSignals(signals)
 	return deduplicateSignals(signals), nil
 }

@@ -22,6 +22,7 @@ const (
 	packagingNameNPM            = "npm"
 	packagingNameContainer      = "container image"
 	packagingNameGoReleaser     = "GoReleaser"
+	packagingNameMaven          = "Maven"
 	packagingNamePyPI           = "PyPI"
 	pypiPublishAction           = "pypa/gh-action-pypi-publish"
 	runnerKindDynamic           = "dynamic"
@@ -31,11 +32,11 @@ const (
 	minimumPackagingFields      = 2
 )
 
-func workflowObservationSignals(filePath string, workflow *actionlint.Workflow) []Signal {
+func workflowObservationSignals(filePath string, data []byte, workflow *actionlint.Workflow) []Signal {
 	signals := cacheModeSignals(filePath, workflow)
 	signals = append(signals, jobTimeoutSignals(filePath, workflow)...)
 	signals = append(signals, runnerSelectionSignals(filePath, workflow)...)
-	signals = append(signals, packagingSignals(filePath, workflow)...)
+	signals = append(signals, packagingSignals(filePath, strings.Split(string(data), "\n"), workflow)...)
 	signals = append(signals, packageProvenanceSignals(filePath, workflow)...)
 	return signals
 }
@@ -171,7 +172,7 @@ func workflowTimeoutValue(timeout *actionlint.Float) string {
 	return strconv.FormatFloat(timeout.Value, 'f', -1, 64)
 }
 
-func packagingSignals(filePath string, workflow *actionlint.Workflow) []Signal {
+func packagingSignals(filePath string, sourceLines []string, workflow *actionlint.Workflow) []Signal {
 	var signals []Signal
 	for _, id := range sortedWorkflowJobIDs(workflow) {
 		job := workflow.Jobs[id]
@@ -186,7 +187,7 @@ func packagingSignals(filePath string, workflow *actionlint.Workflow) []Signal {
 				}
 			case *actionlint.ExecRun:
 				if execution != nil && execution.Run != nil {
-					signals = append(signals, packagingCommandSignals(filePath, execution.Run)...)
+					signals = append(signals, packagingCommandSignals(filePath, sourceLines, execution.Run)...)
 				}
 			}
 		})
@@ -246,8 +247,9 @@ func inputValue(inputs map[string]*actionlint.Input, name string) string {
 	return strings.TrimSpace(strings.ToLower(input.Value.Value))
 }
 
-func packagingCommandSignals(filePath string, run *actionlint.String) []Signal {
+func packagingCommandSignals(filePath string, sourceLines []string, run *actionlint.String) []Signal {
 	baseLine := posLine(run.Pos)
+	literal := workflowScriptBlockStyle(sourceLines, run.Pos) == '|'
 	var signals []Signal
 	for index, line := range strings.Split(run.Value, "\n") {
 		for _, segment := range commandSegments(line) {
@@ -255,16 +257,35 @@ func packagingCommandSignals(filePath string, run *actionlint.String) []Signal {
 			if kind == "" {
 				continue
 			}
+			sourceLine := baseLine
+			if literal {
+				sourceLine += uint(index + 1)
+			}
 			signals = append(signals, Signal{
 				Check: checkPackaging,
 				Kind:  kind,
 				Name:  name,
 				Path:  filePath,
-				Line:  baseLine + uint(index),
+				Line:  sourceLine,
 			})
 		}
 	}
 	return signals
+}
+
+func workflowScriptBlockStyle(sourceLines []string, pos *actionlint.Pos) byte {
+	if pos == nil || pos.Line < 1 || pos.Line > len(sourceLines) || pos.Col < 1 {
+		return 0
+	}
+	line := sourceLines[pos.Line-1]
+	if pos.Col > len(line) {
+		return 0
+	}
+	value := strings.TrimSpace(line[pos.Col-1:])
+	if value == "" || value[0] != '|' && value[0] != '>' {
+		return 0
+	}
+	return value[0]
 }
 
 func commandSegments(line string) []string {
@@ -303,9 +324,9 @@ func packagingCommand(fields []string) (string, string) {
 	case dockerName, "podman":
 		return containerPackagingCommand(args)
 	case "mvn", "mvnw":
-		return packagingVerb("Maven", args[0], "package", "deploy")
+		return packagingVerbAny(packagingNameMaven, args, "package", "deploy")
 	case "gradle", "gradlew":
-		return packagingVerb("Gradle", args[0], "assemble", "publish")
+		return packagingVerbAny("Gradle", args, "assemble", "publish")
 	case "gh":
 		return githubReleaseCommand(args)
 	case "goreleaser":
@@ -368,6 +389,25 @@ func packagingVerb(name, verb, packageVerb, publishVerb string) (string, string)
 	default:
 		return "", ""
 	}
+}
+
+func packagingVerbAny(name string, args []string, packageVerb, publishVerb string) (string, string) {
+	kind := ""
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "-") {
+			continue
+		}
+		switch arg {
+		case publishVerb:
+			return packagingKindPublish, name
+		case packageVerb:
+			kind = packagingKindPackage
+		}
+	}
+	if kind == "" {
+		return "", ""
+	}
+	return kind, name
 }
 
 func pythonPackagingCommand(args []string) (string, string) {

@@ -40,8 +40,8 @@ jobs:
 		{Check: checkCacheMode, Kind: workflowObservationTopLevel, Value: testPermissionRead, Path: testWorkflowPath, Line: 3},
 		{Check: checkCacheMode, Kind: workflowObservationJobLevel, Name: "Build packages", Value: "write-only", Path: testWorkflowPath, Line: 11},
 		{Check: checkJobTimeout, Kind: workflowObservationJobLevel, Name: "Build packages", Value: "30", Path: testWorkflowPath, Line: 12},
-		{Check: checkPackaging, Kind: packagingKindPackage, Name: "Python", Path: testWorkflowPath, Line: 15},
-		{Check: checkPackaging, Kind: packagingKindPublish, Name: packagingNamePyPI, Path: testWorkflowPath, Line: 16},
+		{Check: checkPackaging, Kind: packagingKindPackage, Name: "Python", Path: testWorkflowPath, Line: 16},
+		{Check: checkPackaging, Kind: packagingKindPublish, Name: packagingNamePyPI, Path: testWorkflowPath, Line: 17},
 		{Check: checkPackaging, Kind: packagingKindPublish, Name: packagingNameContainer, Value: "docker/build-push-action", Path: testWorkflowPath, Line: 18},
 		{Check: checkTokenPermissions, Kind: permissionKindReusableTop, Name: "contents", Value: testPermissionRead, Path: testWorkflowPath, Line: 5},
 		{Check: checkTokenPermissions, Kind: permissionKindReusableJob, Name: "packages (Build packages)", Value: testPermissionWrite, Path: testWorkflowPath, Line: 10},
@@ -82,6 +82,30 @@ jobs:
 	for _, signal := range signals {
 		if strings.Contains(signal.Value, "committed-secret") {
 			t.Fatalf("packaging signal copied command arguments: %#v", signal)
+		}
+	}
+}
+
+func TestWorkflowFileSignalsUsesFoldedBlockIndicatorLine(t *testing.T) {
+	signals, err := workflowFileSignals(testWorkflowPath, []byte(`on: push
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - run: >
+          npm pack &&
+          npm publish
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, wanted := range []Signal{
+		{Check: checkPackaging, Kind: packagingKindPackage, Name: packagingNameNPM, Path: testWorkflowPath, Line: 6},
+		{Check: checkPackaging, Kind: packagingKindPublish, Name: packagingNameNPM, Path: testWorkflowPath, Line: 6},
+	} {
+		if !hasWorkflowSignal(signals, wanted) {
+			t.Errorf("signal missing: %#v\ngot: %#v", wanted, signals)
 		}
 	}
 }
@@ -130,6 +154,10 @@ func TestPackagingCommandDistinguishesBuildFromPackage(t *testing.T) {
 		{command: "npm run build"},
 		{command: "cargo package", kind: packagingKindPackage, name: "cargo"},
 		{command: "gem build example.gemspec", kind: packagingKindPackage, name: "RubyGems"},
+		{command: "mvn clean package", kind: packagingKindPackage, name: packagingNameMaven},
+		{command: "mvn -B clean deploy", kind: packagingKindPublish, name: packagingNameMaven},
+		{command: "./mvnw -B deploy", kind: packagingKindPublish, name: packagingNameMaven},
+		{command: "./gradlew build publish", kind: packagingKindPublish, name: "Gradle"},
 		{command: "helm push chart.tgz oci://registry.example", kind: packagingKindPublish, name: "Helm"},
 	}
 	for _, test := range tests {

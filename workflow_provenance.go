@@ -251,6 +251,11 @@ func uvTrustedPublishingCommand(fields []string) bool {
 				return false
 			}
 		}
+		for _, option := range []string{"-p", "-t", "-u"} {
+			if strings.HasPrefix(field, option) {
+				return false
+			}
+		}
 		if strings.EqualFold(field, "--trusted-publishing=never") ||
 			field == "--trusted-publishing" && index+1 < len(args) &&
 				strings.EqualFold(args[index+1], "never") {
