@@ -70,7 +70,18 @@ var fuzzPatterns = map[string][]fuzzPattern{
 
 var sonarPOMPattern = regexp.MustCompile(`<sonar\.host\.url>\s*([^<\s]+)\s*</sonar\.host\.url>`)
 
-const repositoryFilePrefixBytes = 1024
+const (
+	repositoryFilePrefixBytes        = 1024
+	repositoryFileContentBytes int64 = 1 << 20
+	repositoryFileLineBytes          = 1 << 20
+	repositoryFileScanBytes          = 64 << 10
+	repositoryFileMatchBytes         = 4 << 10
+)
+
+type fuzzMatchKey struct {
+	pattern int
+	offset  int64
+}
 
 type repositoryFileCacheKey struct {
 	oid  string
@@ -145,34 +156,109 @@ func allRepositoryFileSignals(tree fs.FS) ([]Signal, error) {
 }
 
 func repositoryFileSignalsFromFS(tree fs.FS, filePath string) ([]Signal, error) {
-	if repositoryFileNeedsFullContent(filePath) {
-		data, err := fs.ReadFile(tree, filePath)
-		if err != nil {
-			return nil, err
-		}
-		return repositoryFileSignalsFromData(filePath, data, false), nil
-	}
-	file, err := tree.Open(filePath)
+	prefix, err := readRepositoryFile(tree, filePath, repositoryFilePrefixBytes)
 	if err != nil {
 		return nil, err
 	}
-	data, readErr := io.ReadAll(io.LimitReader(file, repositoryFilePrefixBytes))
-	if err := errors.Join(readErr, file.Close()); err != nil {
-		return nil, err
+	var signals []Signal
+	if signal, ok := binaryArtifactSignal(filePath, prefix, true); ok {
+		signals = append(signals, signal)
 	}
-	return repositoryFileSignalsFromData(filePath, data, true), nil
+
+	license, notice := legalFileKinds(filePath)
+	if license {
+		data, err := readRepositoryFile(tree, filePath, repositoryFileContentBytes)
+		if err != nil {
+			return nil, err
+		}
+		signals = append(signals, licenseSignals(filePath, data)...)
+	}
+	if notice {
+		signals = append(signals, Signal{
+			Check: checkLicense,
+			Kind:  signalKindNotice,
+			Path:  filePath,
+		})
+	}
+
+	if sbomContentPath(filePath) {
+		parsed, err := scanRepositoryFile(tree, filePath, func(reader io.Reader) ([]Signal, error) {
+			signal, ok, inspectErr := sbomSignal(filePath, reader)
+			if !ok {
+				return nil, inspectErr
+			}
+			return []Signal{signal}, inspectErr
+		})
+		if err != nil {
+			return nil, err
+		}
+		signals = append(signals, parsed...)
+	}
+
+	if securityPolicyPath(filePath) {
+		parsed, err := scanRepositoryFile(tree, filePath, func(reader io.Reader) ([]Signal, error) {
+			return securityPolicySignals(filePath, reader)
+		})
+		if err != nil {
+			return nil, err
+		}
+		signals = append(signals, parsed...)
+	}
+
+	if fuzzingFile(filePath) {
+		parsed, err := scanRepositoryFile(tree, filePath, func(reader io.Reader) ([]Signal, error) {
+			return fuzzingSignals(filePath, reader)
+		})
+		if err != nil {
+			return nil, err
+		}
+		signals = append(signals, parsed...)
+	}
+
+	if sastConfigPath(filePath) {
+		if strings.EqualFold(path.Base(filePath), "pom.xml") {
+			data, err := readRepositoryFile(tree, filePath, repositoryFileContentBytes)
+			if err != nil {
+				return nil, err
+			}
+			signals = append(signals, sastConfigSignals(filePath, data)...)
+		} else {
+			signals = append(signals, sastConfigSignals(filePath, nil)...)
+		}
+	}
+	return signals, nil
 }
 
-func repositoryFileNeedsFullContent(filePath string) bool {
-	if filePath == ".clusterfuzzlite/Dockerfile" || securityPolicyPath(filePath) ||
-		licenseFile(filePath) || sbomContentPath(filePath) || sastConfigPath(filePath) {
-		return true
+func readRepositoryFile(tree fs.FS, filePath string, limit int64) ([]byte, error) {
+	var data []byte
+	err := scanRepositoryFileError(tree, filePath, func(reader io.Reader) error {
+		var err error
+		data, err = io.ReadAll(io.LimitReader(reader, limit))
+		return err
+	})
+	return data, err
+}
+
+func scanRepositoryFile(
+	tree fs.FS,
+	filePath string,
+	scan func(io.Reader) ([]Signal, error),
+) ([]Signal, error) {
+	var signals []Signal
+	err := scanRepositoryFileError(tree, filePath, func(reader io.Reader) error {
+		var err error
+		signals, err = scan(reader)
+		return err
+	})
+	return signals, err
+}
+
+func scanRepositoryFileError(tree fs.FS, filePath string, scan func(io.Reader) error) error {
+	file, err := tree.Open(filePath)
+	if err != nil {
+		return err
 	}
-	if len(fuzzPatterns[strings.ToLower(path.Ext(filePath))]) == 0 {
-		return false
-	}
-	labels, err := roles.Match(filePath)
-	return err != nil || !labels.BundledOrDerived()
+	return errors.Join(scan(file), file.Close())
 }
 
 func sbomContentPath(filePath string) bool {
@@ -194,33 +280,6 @@ func sastConfigPath(filePath string) bool {
 	default:
 		return false
 	}
-}
-
-func repositoryFileSignalsFromData(filePath string, data []byte, prefix bool) []Signal {
-	var signals []Signal
-	if signal, ok := binaryArtifactSignal(filePath, data, prefix); ok {
-		signals = append(signals, signal)
-	}
-	license, notice := legalFileKinds(filePath)
-	if license {
-		signals = append(signals, licenseSignals(filePath, data)...)
-	}
-	if notice {
-		signals = append(signals, Signal{
-			Check: checkLicense,
-			Kind:  signalKindNotice,
-			Path:  filePath,
-		})
-	}
-	if signal, ok := sbomSignal(filePath, data); ok {
-		signals = append(signals, signal)
-	}
-	if securityPolicyPath(filePath) {
-		signals = append(signals, securityPolicySignals(filePath, data)...)
-	}
-	signals = append(signals, fuzzingSignals(filePath, data)...)
-	signals = append(signals, sastConfigSignals(filePath, data)...)
-	return signals
 }
 
 func binaryArtifactSignal(filePath string, data []byte, prefix bool) (Signal, bool) {
@@ -245,11 +304,6 @@ func binaryArtifactSignal(filePath string, data []byte, prefix bool) (Signal, bo
 		Value: result.MIME,
 		Path:  filePath,
 	}, true
-}
-
-func licenseFile(filePath string) bool {
-	license, _ := legalFileKinds(filePath)
-	return license
 }
 
 func legalFileKinds(filePath string) (license, notice bool) {
@@ -318,11 +372,11 @@ func licenseSignals(filePath string, data []byte) []Signal {
 	return signals
 }
 
-func sbomSignal(filePath string, data []byte) (Signal, bool) {
-	typeName := sbom.Detect(data)
-	if typeName == sbom.TypeUnknown {
+func sbomSignal(filePath string, reader io.Reader) (Signal, bool, error) {
+	metadata, err := sbom.Inspect(reader)
+	if errors.Is(err, sbom.ErrUnrecognized) {
 		if !sbomFileName(filePath) {
-			return Signal{}, false
+			return Signal{}, false, nil
 		}
 		return Signal{
 			Check: checkSBOM,
@@ -330,21 +384,19 @@ func sbomSignal(filePath string, data []byte) (Signal, bool) {
 			Name:  path.Base(filePath),
 			Path:  filePath,
 			Line:  1,
-		}, true
+		}, true, nil
 	}
-
-	value := ""
-	if document, err := sbom.Parse(data); err == nil {
-		value = document.Document.SpecVersion
+	if err != nil {
+		return Signal{}, false, err
 	}
 	return Signal{
 		Check: checkSBOM,
 		Kind:  "document",
-		Name:  string(typeName),
-		Value: value,
+		Name:  string(metadata.Type),
+		Value: metadata.SpecVersion,
 		Path:  filePath,
 		Line:  1,
-	}, true
+	}, true, nil
 }
 
 func sbomFileName(filePath string) bool {
@@ -372,14 +424,15 @@ func securityPolicyPath(filePath string) bool {
 	}
 }
 
-func securityPolicySignals(filePath string, data []byte) []Signal {
+func securityPolicySignals(filePath string, reader io.Reader) ([]Signal, error) {
 	signals := []Signal{{
 		Check: checkSecurityPolicy,
 		Kind:  "policy",
 		Path:  filePath,
 		Line:  1,
 	}}
-	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(nil, repositoryFileLineBytes)
 	line := uint(0)
 	for scanner.Scan() {
 		line++
@@ -403,7 +456,7 @@ func securityPolicySignals(filePath string, data []byte) []Signal {
 			})
 		}
 	}
-	return signals
+	return signals, scanner.Err()
 }
 
 func securityPolicyURLs(text string) []string {
@@ -426,31 +479,98 @@ func explicitMarkdownURL(text string, start, end int) bool {
 	return markdownDestination || autolink
 }
 
-func fuzzingSignals(filePath string, data []byte) []Signal {
-	if filePath == ".clusterfuzzlite/Dockerfile" && len(bytes.TrimSpace(data)) > 0 {
-		return []Signal{{
-			Check: checkFuzzing,
-			Kind:  "fuzzer",
-			Name:  "ClusterFuzzLite",
-			Path:  filePath,
-			Line:  1,
-		}}
+func fuzzingFile(filePath string) bool {
+	if filePath == ".clusterfuzzlite/Dockerfile" {
+		return true
 	}
 	labels, err := roles.Match(filePath)
 	if err == nil && labels.BundledOrDerived() {
-		return nil
+		return false
+	}
+	return len(fuzzPatterns[strings.ToLower(path.Ext(filePath))]) > 0
+}
+
+func fuzzingSignals(filePath string, reader io.Reader) ([]Signal, error) {
+	if filePath == ".clusterfuzzlite/Dockerfile" {
+		return clusterFuzzLiteSignals(filePath, reader)
 	}
 	patterns := fuzzPatterns[strings.ToLower(path.Ext(filePath))]
+	buffer := make([]byte, repositoryFileScanBytes)
+	seen := make(map[fuzzMatchKey]bool)
 	var signals []Signal
-	for _, pattern := range patterns {
+	var carry []byte
+	windowOffset := int64(0)
+	windowLine := uint(1)
+	for {
+		n, err := io.ReadFull(reader, buffer)
+		if n > 0 {
+			window := make([]byte, len(carry)+n)
+			copy(window, carry)
+			copy(window[len(carry):], buffer[:n])
+			signals = append(signals, fuzzingSignalsInWindow(
+				filePath, patterns, window, windowOffset, windowLine, seen,
+			)...)
+
+			keep := min(len(window), repositoryFileMatchBytes)
+			trim := len(window) - keep
+			windowOffset += int64(trim)
+			windowLine += uint(bytes.Count(window[:trim], []byte{'\n'}))
+			carry = append(carry[:0], window[trim:]...)
+		}
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			return signals, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+}
+
+func clusterFuzzLiteSignals(filePath string, reader io.Reader) ([]Signal, error) {
+	buffer := make([]byte, repositoryFileScanBytes)
+	for {
+		n, err := reader.Read(buffer)
+		if len(bytes.TrimSpace(buffer[:n])) > 0 {
+			return []Signal{{
+				Check: checkFuzzing,
+				Kind:  "fuzzer",
+				Name:  "ClusterFuzzLite",
+				Path:  filePath,
+				Line:  1,
+			}}, nil
+		}
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil, nil
+			}
+			return nil, err
+		}
+	}
+}
+
+func fuzzingSignalsInWindow(
+	filePath string,
+	patterns []fuzzPattern,
+	data []byte,
+	offset int64,
+	line uint,
+	seen map[fuzzMatchKey]bool,
+) []Signal {
+	var signals []Signal
+	for patternIndex, pattern := range patterns {
 		for _, match := range pattern.expression.FindAllIndex(data, -1) {
+			key := fuzzMatchKey{pattern: patternIndex, offset: offset + int64(match[0])}
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
 			signals = append(signals, Signal{
 				Check: checkFuzzing,
 				Kind:  "fuzzer",
 				Name:  pattern.name,
 				Value: string(data[match[0]:match[1]]),
 				Path:  filePath,
-				Line:  lineForOffset(data, match[0]),
+				Line:  line + uint(bytes.Count(data[:match[0]], []byte{'\n'})),
 			})
 		}
 	}

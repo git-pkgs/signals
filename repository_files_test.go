@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"io/fs"
 	"strings"
 	"testing"
@@ -13,6 +14,9 @@ import (
 const (
 	testLicensePath        = "LICENSE"
 	testMITLicenseID       = "MIT"
+	testFuzzPath           = "fuzz_test.go"
+	testFuzzerKind         = "fuzzer"
+	testGoFuzzerName       = "GoBuiltInFuzzer"
 	testJSONLFlag          = "--jsonl"
 	testSecurityPolicyPath = ".github/SECURITY.md"
 	testStatsFlag          = "--stats"
@@ -144,14 +148,26 @@ func TestRepositoryFileSignalsDetectsFuzzersAndSASTConfig(t *testing.T) {
 		want Signal
 	}{
 		{
-			path: "fuzz_test.go",
+			path: testFuzzPath,
 			data: "package example\nfunc FuzzProject(f *testing.F) {}\n",
 			want: Signal{
 				Check: checkFuzzing,
-				Kind:  "fuzzer",
-				Name:  "GoBuiltInFuzzer",
+				Kind:  testFuzzerKind,
+				Name:  testGoFuzzerName,
 				Value: "func FuzzProject(f *testing.F)",
-				Path:  "fuzz_test.go",
+				Path:  testFuzzPath,
+				Line:  2,
+			},
+		},
+		{
+			path: "multiline_fuzz_test.go",
+			data: "package example\nfunc\nFuzzProject(f *testing.F) {}\n",
+			want: Signal{
+				Check: checkFuzzing,
+				Kind:  testFuzzerKind,
+				Name:  testGoFuzzerName,
+				Value: "func\nFuzzProject(f *testing.F)",
+				Path:  "multiline_fuzz_test.go",
 				Line:  2,
 			},
 		},
@@ -160,7 +176,7 @@ func TestRepositoryFileSignalsDetectsFuzzersAndSASTConfig(t *testing.T) {
 			data: "FROM gcr.io/oss-fuzz-base/base-builder\n",
 			want: Signal{
 				Check: checkFuzzing,
-				Kind:  "fuzzer",
+				Kind:  testFuzzerKind,
 				Name:  "ClusterFuzzLite",
 				Path:  ".clusterfuzzlite/Dockerfile",
 				Line:  1,
@@ -232,12 +248,45 @@ func TestRepositoryFileSignalsForChangesSkipsDirectories(t *testing.T) {
 	}
 }
 
-func TestRepositoryFileNeedsFullContentSkipsVendoredFuzzSources(t *testing.T) {
-	if repositoryFileNeedsFullContent("vendor/dependency/fuzz_test.go") {
-		t.Fatal("vendored fuzz source requires full content")
+func TestRepositoryFileFuzzingSelectionSkipsVendoredSources(t *testing.T) {
+	if fuzzingFile("vendor/dependency/fuzz_test.go") {
+		t.Fatal("vendored fuzz source selected")
 	}
-	if !repositoryFileNeedsFullContent("fuzz_test.go") {
-		t.Fatal("project fuzz source does not require full content")
+	if !fuzzingFile(testFuzzPath) {
+		t.Fatal("project fuzz source not selected")
+	}
+}
+
+func TestRepositoryFileFuzzingMatchCrossesReadBoundary(t *testing.T) {
+	match := "func FuzzProject(f *testing.F)"
+	data := bytes.Repeat([]byte{'x'}, repositoryFileScanBytes-len("func "))
+	data = append(data, match...)
+	signals := repositorySignals(t, testFuzzPath, data)
+	wanted := Signal{
+		Check: checkFuzzing,
+		Kind:  testFuzzerKind,
+		Name:  testGoFuzzerName,
+		Value: match,
+		Path:  testFuzzPath,
+		Line:  1,
+	}
+	if !containsExactSignal(signals, wanted) {
+		t.Fatalf("signals = %#v", signals)
+	}
+}
+
+func TestReadRepositoryFileLimitsContent(t *testing.T) {
+	data := bytes.Repeat([]byte{'x'}, int(repositoryFileContentBytes)+1)
+	read, err := readRepositoryFile(
+		fstest.MapFS{"large.txt": {Data: data}},
+		"large.txt",
+		repositoryFileContentBytes,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(read) != int(repositoryFileContentBytes) {
+		t.Fatalf("read %d bytes, want %d", len(read), repositoryFileContentBytes)
 	}
 }
 
@@ -256,6 +305,11 @@ func TestLogDetectsRepositoryFileSignals(t *testing.T) {
 	writeFile(t, repo, "SECURITY.md", "Report issues to security@example.com.\n")
 	writeFile(t, repo, "bom.json", `{"bomFormat":"CycloneDX","specVersion":"1.6","version":1}`)
 	writeFile(t, repo, "tool.wasm", string([]byte{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00}))
+	paddingLine := "// history padding\n"
+	paddingLines := int(repositoryFileContentBytes)/len(paddingLine) + 1
+	writeFile(t, repo, testFuzzPath,
+		"package example\n"+strings.Repeat(paddingLine, paddingLines)+"func FuzzProject(f *testing.F) {}\n",
+	)
 	gitRun(t, repo, "add", ".")
 	gitRun(t, repo, "commit", "-m", "Add repository security evidence")
 
@@ -269,6 +323,7 @@ func TestLogDetectsRepositoryFileSignals(t *testing.T) {
 		"+ SBOM/document cyclonedx at bom.json:1 = 1.6",
 		"+ Security-Policy/policy at SECURITY.md:1",
 		"+ Security-Policy/email at SECURITY.md:1 = security@example.com",
+		fmt.Sprintf("+ Fuzzing/%s %s at %s:%d", testFuzzerKind, testGoFuzzerName, testFuzzPath, paddingLines+2),
 	} {
 		if !strings.Contains(stdout.String(), expected) {
 			t.Errorf("output missing %q:\n%s", expected, stdout.String())
