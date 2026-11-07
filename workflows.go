@@ -206,7 +206,7 @@ func untrustedCheckout(execution *actionlint.ExecAction) bool {
 	ref := strings.ToLower(input.Value.Value)
 	if strings.Contains(ref, "github.event.pull_request") ||
 		strings.Contains(ref, "github.event.workflow_run") ||
-		strings.Contains(ref, "refs/pull/") && strings.Contains(ref, "github.event.number") {
+		(strings.Contains(ref, "refs/pull/") && strings.Contains(ref, "github.event.number")) {
 		return true
 	}
 	repository := execution.Inputs["repository"]
