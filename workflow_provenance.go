@@ -235,7 +235,7 @@ func pypiTrustedPublishingAction(execution *actionlint.ExecAction) bool {
 	if execution == nil || execution.Uses == nil || execution.InputsExpression != nil {
 		return false
 	}
-	action, _, _ := strings.Cut(strings.TrimPrefix(strings.ToLower(execution.Uses.Value), "actions://"), "@")
+	action := workflowActionReference(execution.Uses.Value)
 	return action == pypiPublishAction && inputValue(execution.Inputs, "password") == ""
 }
 

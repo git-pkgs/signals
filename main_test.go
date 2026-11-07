@@ -124,6 +124,56 @@ jobs:
 	}
 }
 
+func TestLogTracksArtifactProvenanceWorkflow(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.name", "Signals Test")
+	gitRun(t, repo, "config", "user.email", "signals@example.com")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+
+	writeFile(t, repo, "README.md", "# example\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Initial commit")
+
+	writeFile(t, repo, testWorkflowPath, `name: Release
+on: push
+jobs:
+  attest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/attest-build-provenance@v3
+`)
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Add build provenance")
+
+	writeFile(t, repo, testWorkflowPath, `name: Release
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+`)
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Remove build provenance")
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"log", testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
+		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
+	}
+	for _, expected := range []string{
+		"+ Artifact-Provenance/attestation-action actions/attest-build-provenance at .github/workflows/ci.yml",
+		"- Artifact-Provenance/attestation-action actions/attest-build-provenance at .github/workflows/ci.yml",
+	} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Errorf("output missing %q:\n%s", expected, stdout.String())
+		}
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected detection errors:\n%s", stderr.String())
+	}
+}
+
 func TestLogDetectsDependencyUpdateConfigChanges(t *testing.T) {
 	repo := t.TempDir()
 	gitRun(t, repo, "init", "-b", "main")

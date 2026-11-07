@@ -237,6 +237,52 @@ jobs:
 	}
 }
 
+func TestWorkflowFileSignalsDetectsArtifactProvenanceActions(t *testing.T) {
+	signals, err := workflowFileSignals(testWorkflowPath, []byte(`name: Release
+on: push
+jobs:
+  provenance:
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2
+  attest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/attest-build-provenance@v3
+      - uses: actions/attest@v4
+      - uses: actions/checkout@v4
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, wanted := range []Signal{
+		{
+			Check: checkArtifactProvenance,
+			Kind:  "slsa-generator",
+			Name:  "slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml",
+			Path:  testWorkflowPath,
+		},
+		{
+			Check: checkArtifactProvenance,
+			Kind:  "attestation-action",
+			Name:  "actions/attest-build-provenance",
+			Path:  testWorkflowPath,
+		},
+		{
+			Check: checkArtifactProvenance,
+			Kind:  "attestation-action",
+			Name:  "actions/attest",
+			Path:  testWorkflowPath,
+		},
+	} {
+		if !hasWorkflowSignal(signals, wanted) {
+			t.Errorf("signal missing: %#v\ngot: %#v", wanted, signals)
+		}
+	}
+	if got := countWorkflowSignals(signals, checkArtifactProvenance, "attestation-action"); got != 2 {
+		t.Errorf("attestation signals = %d, want 2: %#v", got, signals)
+	}
+}
+
 func TestWorkflowSignalsForChangesUsesBlobCache(t *testing.T) {
 	cache := make(map[workflowCacheKey][]Signal)
 	changes := []githistory.Change{{Path: testWorkflowPath, NewOID: "1234"}}

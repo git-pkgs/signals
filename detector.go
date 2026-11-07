@@ -6,6 +6,7 @@ import (
 )
 
 const (
+	checkArtifactProvenance   = "Artifact-Provenance"
 	checkBinaryArtifacts      = "Binary-Artifacts"
 	checkDangerousWorkflow    = "Dangerous-Workflow"
 	checkDependencyUpdateTool = "Dependency-Update-Tool"

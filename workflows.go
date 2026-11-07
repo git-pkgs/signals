@@ -139,8 +139,59 @@ func workflowFileSignals(path string, data []byte) ([]Signal, error) {
 	signals = append(signals, tokenPermissionSignals(path, workflow)...)
 	signals = append(signals, sastWorkflowSignals(path, workflow)...)
 	signals = append(signals, workflowObservationSignals(path, data, workflow)...)
+	signals = append(signals, artifactProvenanceSignals(path, workflow)...)
 	sortSignals(signals)
 	return deduplicateSignals(signals), nil
+}
+
+func artifactProvenanceSignals(path string, workflow *actionlint.Workflow) []Signal {
+	var signals []Signal
+	for _, id := range sortedWorkflowJobIDs(workflow) {
+		job := workflow.Jobs[id]
+		if job == nil {
+			continue
+		}
+		if job.WorkflowCall != nil && job.WorkflowCall.Uses != nil {
+			kind, name := artifactProvenanceAction(job.WorkflowCall.Uses.Value)
+			if kind != "" {
+				signals = append(signals, Signal{
+					Check: checkArtifactProvenance,
+					Kind:  kind,
+					Name:  name,
+					Path:  path,
+				})
+			}
+		}
+		walkWorkflowSteps(job.Steps, func(step *actionlint.Step) {
+			execution, ok := step.Exec.(*actionlint.ExecAction)
+			if !ok || execution == nil || execution.Uses == nil {
+				return
+			}
+			kind, name := artifactProvenanceAction(execution.Uses.Value)
+			if kind == "" {
+				return
+			}
+			signals = append(signals, Signal{
+				Check: checkArtifactProvenance,
+				Kind:  kind,
+				Name:  name,
+				Path:  path,
+			})
+		})
+	}
+	return signals
+}
+
+func artifactProvenanceAction(uses string) (kind, name string) {
+	action := workflowActionReference(uses)
+	switch {
+	case action == "actions/attest" || strings.HasPrefix(action, "actions/attest-"):
+		return "attestation-action", action
+	case strings.HasPrefix(action, "slsa-framework/slsa-github-generator/"):
+		return "slsa-generator", action
+	default:
+		return "", ""
+	}
 }
 
 func dangerousWorkflowSignals(path string, workflow *actionlint.Workflow) []Signal {
@@ -195,11 +246,17 @@ func workflowHasEvent(workflow *actionlint.Workflow, name string) bool {
 	return false
 }
 
+func workflowActionReference(uses string) string {
+	action := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(uses)), "actions://")
+	action, _, _ = strings.Cut(action, "@")
+	return action
+}
+
 func untrustedCheckout(execution *actionlint.ExecAction) bool {
 	if execution == nil || execution.Uses == nil {
 		return false
 	}
-	action, _, _ := strings.Cut(strings.ToLower(execution.Uses.Value), "@")
+	action := workflowActionReference(execution.Uses.Value)
 	if action != "actions/checkout" {
 		return false
 	}
@@ -335,8 +392,7 @@ func sastWorkflowSignals(path string, workflow *actionlint.Workflow) []Signal {
 }
 
 func sastToolForAction(uses string) string {
-	action := strings.TrimPrefix(strings.ToLower(uses), "actions://")
-	action, _, _ = strings.Cut(action, "@")
+	action := workflowActionReference(uses)
 	switch {
 	case action == "github/codeql-action/analyze":
 		return "CodeQL"
@@ -480,6 +536,7 @@ func (d *localDetectors) runWorkflows(
 
 	delete(current.errors, detectorWorkflows)
 	if forceFull {
+		removeCheckSignals(current.signals, checkArtifactProvenance)
 		removeCheckSignals(current.signals, checkDangerousWorkflow)
 		removeCheckSignals(current.signals, checkTokenPermissions)
 		removeCheckSignals(current.signals, checkCacheMode)
@@ -494,6 +551,7 @@ func (d *localDetectors) runWorkflows(
 			pathSet[path] = true
 		}
 		removePathSignals(current.signals, checkDangerousWorkflow, pathSet)
+		removePathSignals(current.signals, checkArtifactProvenance, pathSet)
 		removePathSignals(current.signals, checkTokenPermissions, pathSet)
 		removePathSignals(current.signals, checkCacheMode, pathSet)
 		removePathSignals(current.signals, checkJobTimeout, pathSet)

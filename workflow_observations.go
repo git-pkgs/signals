@@ -199,7 +199,7 @@ func packagingActionSignal(filePath string, execution *actionlint.ExecAction, po
 	if execution == nil || execution.Uses == nil {
 		return Signal{}, false
 	}
-	action, _, _ := strings.Cut(strings.TrimPrefix(strings.ToLower(execution.Uses.Value), "actions://"), "@")
+	action := workflowActionReference(execution.Uses.Value)
 	kind, name := packagingAction(action, execution.Inputs)
 	if kind == "" {
 		return Signal{}, false
