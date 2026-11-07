@@ -18,6 +18,8 @@ const (
 	testFuzzerKind         = "fuzzer"
 	testGoFuzzerName       = "GoBuiltInFuzzer"
 	testJSONLFlag          = "--jsonl"
+	testLogCommand         = "log"
+	testPackageName        = "example"
 	testSecurityPolicyPath = ".github/SECURITY.md"
 	testStatsFlag          = "--stats"
 	testWorkersFlag        = "--workers"
@@ -314,7 +316,7 @@ func TestLogDetectsRepositoryFileSignals(t *testing.T) {
 	gitRun(t, repo, "commit", "-m", "Add repository security evidence")
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"log", testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
+	if err := run([]string{testLogCommand, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 	for _, expected := range []string{

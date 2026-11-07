@@ -18,6 +18,9 @@ const (
 	workflowKindUntrustedCheckout = "untrustedCheckout"
 	permissionKindTopLevel        = "topLevel"
 	permissionKindJobLevel        = "jobLevel"
+	permissionKindReusableCall    = "reusableCall"
+	permissionKindReusableJob     = "reusableJob"
+	permissionKindReusableTop     = "reusableTopLevel"
 )
 
 var dangerousToJSONPattern = regexp.MustCompile(`(?i)tojson\s*\(\s*github(?:\.event)?\s*\)`)
@@ -135,6 +138,7 @@ func workflowFileSignals(path string, data []byte) ([]Signal, error) {
 	signals := dangerousWorkflowSignals(path, workflow)
 	signals = append(signals, tokenPermissionSignals(path, workflow)...)
 	signals = append(signals, sastWorkflowSignals(path, workflow)...)
+	signals = append(signals, workflowObservationSignals(path, data, workflow)...)
 	sortSignals(signals)
 	return deduplicateSignals(signals), nil
 }
@@ -272,15 +276,28 @@ func expressionIsUntrusted(expression string) bool {
 }
 
 func tokenPermissionSignals(path string, workflow *actionlint.Workflow) []Signal {
-	signals := permissionSignals(path, permissionKindTopLevel, "", workflow.Permissions, nil)
+	topKind := permissionKindTopLevel
+	var fallback *actionlint.Pos
+	definition, reusable := workflow.FindWorkflowCallEvent()
+	if reusable {
+		topKind = permissionKindReusableTop
+		fallback = definition.Pos
+	}
+	signals := permissionSignals(path, topKind, "", workflow.Permissions, fallback)
 	for _, id := range sortedWorkflowJobIDs(workflow) {
 		job := workflow.Jobs[id]
 		if job == nil {
 			continue
 		}
+		kind := permissionKindJobLevel
+		if job.WorkflowCall != nil {
+			kind = permissionKindReusableCall
+		} else if reusable {
+			kind = permissionKindReusableJob
+		}
 		signals = append(signals, permissionSignals(
 			path,
-			permissionKindJobLevel,
+			kind,
 			workflowJobName(job),
 			job.Permissions,
 			job.Pos,
@@ -465,6 +482,11 @@ func (d *localDetectors) runWorkflows(
 	if forceFull {
 		removeCheckSignals(current.signals, checkDangerousWorkflow)
 		removeCheckSignals(current.signals, checkTokenPermissions)
+		removeCheckSignals(current.signals, checkCacheMode)
+		removeCheckSignals(current.signals, checkJobTimeout)
+		removeCheckSignals(current.signals, checkPackaging)
+		removeWorkflowCheckSignals(current.signals, checkPackageProvenance)
+		removeCheckSignals(current.signals, checkRunnerSelection)
 		removeWorkflowCheckSignals(current.signals, checkSAST)
 	} else {
 		pathSet := make(map[string]bool, len(paths))
@@ -473,6 +495,11 @@ func (d *localDetectors) runWorkflows(
 		}
 		removePathSignals(current.signals, checkDangerousWorkflow, pathSet)
 		removePathSignals(current.signals, checkTokenPermissions, pathSet)
+		removePathSignals(current.signals, checkCacheMode, pathSet)
+		removePathSignals(current.signals, checkJobTimeout, pathSet)
+		removePathSignals(current.signals, checkPackaging, pathSet)
+		removePathSignals(current.signals, checkPackageProvenance, pathSet)
+		removePathSignals(current.signals, checkRunnerSelection, pathSet)
 		removePathSignals(current.signals, checkSAST, pathSet)
 	}
 	addSignals(current.signals, signals)
