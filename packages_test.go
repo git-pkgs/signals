@@ -37,6 +37,41 @@ func TestPackageFileSignalsFindsExactManifestPins(t *testing.T) {
 	}
 }
 
+func TestPackageFileSignalsFindsManifestLicenses(t *testing.T) {
+	signals := packageFileSignals("Cargo.toml", []byte(`[package]
+name = "example"
+version = "1.0.0"
+license = "MIT OR Apache-2.0"
+license-file = "COPYING"
+`))
+
+	findPackageSignal(t, signals, checkLicense, signalKindDeclaration, "MIT OR Apache-2.0")
+	reference := findPackageSignal(t, signals, checkLicense, signalKindFileReference, "")
+	if reference.Value != "COPYING" {
+		t.Errorf("license file reference = %q, want COPYING", reference.Value)
+	}
+}
+
+func TestPackageAndRepositoryLicenseSignalsHaveSeparateOwnership(t *testing.T) {
+	signals := map[string]Signal{}
+	for _, signal := range []Signal{
+		{Check: checkLicense, Kind: signalKindDeclaration, Name: testMITLicenseID, Path: packageJSONPath},
+		{Check: checkLicense, Kind: signalKindLicense, Name: testMITLicenseID, Path: testLicensePath},
+		{Check: checkLicense, Kind: signalKindNotice, Path: "NOTICE"},
+	} {
+		signals[signalKey(signal)] = signal
+	}
+
+	removePackageSignals(signals, nil)
+	if len(signals) != 2 {
+		t.Fatalf("after package removal = %#v", signals)
+	}
+	removeRepositoryLicenseSignals(signals, nil)
+	if len(signals) != 0 {
+		t.Fatalf("after repository removal = %#v", signals)
+	}
+}
+
 func TestPackageFileSignalsClassifiesGitHubActionPins(t *testing.T) {
 	const pinned = "de0fac2e4500dabe0009e67214ff5f5447ce83dd"
 	signals := packageFileSignals(".github/workflows/ci.yml", []byte(`jobs:

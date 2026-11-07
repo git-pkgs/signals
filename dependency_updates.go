@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/tidwall/jsonc"
 	"github.com/titanous/json5"
@@ -25,10 +26,11 @@ const (
 	dependabotYMLPath           = ".github/dependabot.yml"
 	dependabotYAMLPath          = ".github/dependabot.yaml"
 	packageJSONPath             = "package.json"
+	renovateJSONPath            = "renovate.json"
 )
 
 var renovateConfigPaths = []string{
-	"renovate.json",
+	renovateJSONPath,
 	"renovate.jsonc",
 	"renovate.json5",
 	".github/renovate.json",
@@ -42,6 +44,12 @@ var renovateConfigPaths = []string{
 	".renovaterc.jsonc",
 	".renovaterc.json5",
 	packageJSONPath,
+}
+
+var scalaStewardConfigPaths = []string{
+	".scala-steward.conf", "scala-steward.conf",
+	".github/.scala-steward.conf", ".github/scala-steward.conf",
+	".config/.scala-steward.conf", ".config/scala-steward.conf",
 }
 
 type dependabotConfig struct {
@@ -131,8 +139,56 @@ func dependencyUpdateConfigSignals(tree fs.FS) ([]Signal, error) {
 		return nil, err
 	}
 	signals = append(signals, renovate...)
+	tools, err := dependencyUpdateToolSignals(tree, signals)
+	if err != nil {
+		return nil, err
+	}
+	signals = append(signals, tools...)
 	sortSignals(signals)
 	return deduplicateSignals(signals), nil
+}
+
+func dependencyUpdateToolSignals(tree fs.FS, configSignals []Signal) ([]Signal, error) {
+	seen := make(map[string]bool)
+	var signals []Signal
+	for _, signal := range configSignals {
+		if signal.Check != checkDependencyUpdateConfig || seen[signal.Kind] {
+			continue
+		}
+		if signal.Kind != dependencyToolDependabot && signal.Kind != dependencyToolRenovate {
+			continue
+		}
+		seen[signal.Kind] = true
+		signals = append(signals, dependencyUpdateToolSignal(signal.Kind, signal.Path))
+	}
+	for _, filePath := range scalaStewardConfigPaths {
+		if seen["Scala Steward"] {
+			break
+		}
+		info, err := fs.Stat(tree, filePath)
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("stat Scala Steward config %s: %w", filePath, err)
+		}
+		if info.IsDir() {
+			continue
+		}
+		seen["Scala Steward"] = true
+		signals = append(signals, dependencyUpdateToolSignal("Scala Steward", filePath))
+	}
+	return signals, nil
+}
+
+func dependencyUpdateToolSignal(tool, filePath string) Signal {
+	return Signal{
+		Check: checkDependencyUpdateTool,
+		Kind:  signalKindTool,
+		Name:  tool,
+		Path:  filePath,
+		Line:  1,
+	}
 }
 
 func dependabotSignals(path string, data []byte) []Signal {
@@ -505,6 +561,11 @@ func dependencyUpdateConfigAffected(changes []string) bool {
 			return true
 		}
 		for _, path := range renovateConfigPaths {
+			if lower == strings.ToLower(path) {
+				return true
+			}
+		}
+		for _, path := range scalaStewardConfigPaths {
 			if lower == strings.ToLower(path) {
 				return true
 			}

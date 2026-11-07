@@ -89,7 +89,6 @@ type snapshotCollector struct {
 func newSnapshotCollector(
 	repo *githistory.Repo,
 	local *localDetectors,
-	uri string,
 	opts LogOptions,
 	cache *blobCache,
 	stats *scanStats,
@@ -115,11 +114,11 @@ func newSnapshotCollector(
 	if err != nil {
 		return nil, err
 	}
-	start, err := loadBoundarySnapshot(gitRepo, local, uri, opts.Ref, "start", opts.After, cache, stats)
+	start, err := loadBoundarySnapshot(gitRepo, local, opts.Ref, "start", opts.After, cache, stats)
 	if err != nil {
 		return nil, err
 	}
-	end, err := loadBoundarySnapshot(gitRepo, local, uri, opts.Ref, "end", opts.Before, cache, stats)
+	end, err := loadBoundarySnapshot(gitRepo, local, opts.Ref, "end", opts.Before, cache, stats)
 	if err != nil {
 		return nil, err
 	}

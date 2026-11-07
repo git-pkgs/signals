@@ -139,9 +139,35 @@ func packageFileSignals(path string, data []byte) []Signal {
 
 	switch result.Kind {
 	case manifests.Manifest:
+		signals = append(signals, manifestLicenseSignals(path, result)...)
 		signals = append(signals, manifestPinSignals(path, result)...)
 	case manifests.Lockfile:
 		signals = append(signals, lockfileSignals(path, result)...)
+	}
+	return signals
+}
+
+func manifestLicenseSignals(path string, result *manifests.ParseResult) []Signal {
+	signals := make([]Signal, 0, len(result.Licenses)+1)
+	for _, license := range result.Licenses {
+		license = strings.TrimSpace(license)
+		if license == "" {
+			continue
+		}
+		signals = append(signals, Signal{
+			Check: checkLicense,
+			Kind:  signalKindDeclaration,
+			Name:  license,
+			Path:  path,
+		})
+	}
+	if licenseFile := strings.TrimSpace(result.LicenseFile); licenseFile != "" {
+		signals = append(signals, Signal{
+			Check: checkLicense,
+			Kind:  signalKindFileReference,
+			Value: licenseFile,
+			Path:  path,
+		})
 	}
 	return signals
 }
@@ -345,7 +371,9 @@ func nonzeroOID(oid string) string {
 
 func removePackageSignals(signals map[string]Signal, paths map[string]bool) {
 	for key, signal := range signals {
-		if packageChecks[signal.Check] && (paths == nil || paths[signal.Path]) {
+		owned := packageChecks[signal.Check] || signal.Check == checkLicense &&
+			(signal.Kind == signalKindDeclaration || signal.Kind == signalKindFileReference)
+		if owned && (paths == nil || paths[signal.Path]) {
 			delete(signals, key)
 		}
 	}

@@ -1,6 +1,6 @@
 # signals
 
-A command for tracing security-relevant evidence stored in Git across repository history. It shows when detected evidence appears, changes, or disappears, with the commit and path behind each change. `signals` walks commit trees with [`github.com/git-pkgs/history`](https://github.com/git-pkgs/history). It combines nine raw detectors from OpenSSF Scorecard v5.6.0 with git-pkgs modules that detect CI and security tools, secrets, REUSE metadata, package managers, manifests, lockfiles, dependency pinning, and update configuration. Commit data adds dependency-bot and signature events plus contributor, maintenance, review, and signing metrics. The output contains the evidence and its provenance without calculating a score. The scan reads local Git objects, with forge APIs, release APIs, credential validation, and external services disabled.
+A command for tracing security-relevant evidence stored in Git across repository history. It shows when detected evidence appears, changes, or disappears, with the commit and path behind each change. `signals` walks commit trees with [`github.com/git-pkgs/history`](https://github.com/git-pkgs/history). Local parsers detect workflow risks and permissions, CI and security tools, secrets, REUSE metadata, package managers, manifests, lockfiles, dependency pinning, update configuration, licenses, SBOMs, fuzzers, and binary artifacts. Commit data adds dependency-bot and signature events plus contributor, maintenance, review, and signing metrics. The output contains the evidence and its provenance without calculating a score. The scan reads local Git objects, with forge APIs, release APIs, credential validation, and external services disabled.
 
 The local-only timeline answers questions about when repository evidence changed. Examples include:
 
@@ -111,21 +111,21 @@ Snapshot metrics use the preceding 90 days. They report non-bot contributor and 
 
 ## Detected signals
 
-The command runs nine Scorecard checks. Several retain the repository-backed part of a check because Scorecard combines local files with remote evidence.
+Nine checks retain names used by Scorecard, but their evidence is detected by local parsers in `signals`.
 
 | Check | Local evidence | Remote evidence omitted |
 | --- | --- | --- |
-| Binary-Artifacts | Binary files identified by content or extension | Successful Gradle wrapper-validation runs |
-| Dangerous-Workflow | Script injection and untrusted checkout patterns in Actions workflows | None |
+| Binary-Artifacts | Compiled and packaged binary files identified by `git-pkgs/magic` and known extensions | Successful Gradle wrapper-validation runs |
+| Dangerous-Workflow | Script injection and untrusted checkout patterns parsed with Actionlint | None |
 | Dependency-Update-Tool | Dependabot, Renovate, and Scala Steward configuration | Dependabot-authored commit search |
-| Fuzzing | ClusterFuzzLite configuration and source patterns selected by the languages in each commit | OSS-Fuzz membership |
-| License | Root license filename detection | Forge license classification |
-| SAST | Known Actions and Sonar configuration in `pom.xml` | Successful check runs |
-| SBOM | Root source SBOM filenames | Release assets |
-| Security-Policy | Policy files and their contact or disclosure text | Inherited policy from the organization `.github` repository |
-| Token-Permissions | Top-level and job-level Actions permissions | None |
+| Fuzzing | ClusterFuzzLite configuration and language-specific source patterns outside bundled or derived paths | OSS-Fuzz membership |
+| License | License and notice files classified by path, license text identified from file contents, and license values or file references declared by parsed manifests | Forge license classification |
+| SAST | Known Actions, Sonar configuration, and Qodana configuration | Successful check runs |
+| SBOM | SPDX and CycloneDX documents detected from content, plus named candidates that cannot be parsed | Release assets |
+| Security-Policy | Accepted policy paths with extracted email addresses and links | Inherited policy from the organization `.github` repository |
+| Token-Permissions | Top-level and job-level Actions permission declarations parsed with Actionlint | None |
 
-Unsupported client methods return Scorecard's `ErrUnsupportedFeature`, and the scan performs no network requests. Detector errors are reported on stderr. The previous successful state for that check remains in place until detection succeeds again.
+The scan performs no network requests. Detector errors are reported on stderr. The previous successful state for that detector remains in place until detection succeeds again.
 
 The additional detectors use the same persistent signal model:
 
@@ -150,19 +150,19 @@ The additional detectors use the same persistent signal model:
 
 ## History scanning
 
-The root commit receives a full scan. Later commits reuse their first parent's signal state and rerun a detector only when relevant paths change. Checks with cross-file behavior, including License, SBOM, Security-Policy, and dependency-update configuration, receive a full commit tree when one of their inputs changes.
+The root commit and missing history boundaries receive a full scan. Later commits reuse their first parent's signal state and update the paths changed by that commit. Cross-file detectors, including dependency-update configuration and REUSE metadata, receive a full commit tree when one of their inputs changes.
 
-File content is cached by Git blob OID for the whole run. Unchanged bytes are read once even when they appear in many commits or several detectors request them. Commit reading can run concurrently, while signal-state updates remain ordered. Fuzzing keeps a language inventory for each commit using `github.com/git-pkgs/languages`. Unambiguous extensions need no content read; ambiguous extensions use a cached 4 KB prefix. `github.com/git-pkgs/roles` removes vendored, generated, fixture, cache, and build-output paths from that inventory and from the files scanned for fuzzing patterns. Test paths remain eligible because fuzz targets commonly use them.
+Parser results for changed files are cached by Git blob OID and path for the whole run. Repository files that cannot contain a license, SBOM, fuzzer, policy, or SAST configuration need only a 1 KB prefix for binary classification. Commit reading can run concurrently, while signal-state updates remain ordered. `github.com/git-pkgs/languages` keeps a language inventory so Brief can rerun language-gated detection only when needed. `github.com/git-pkgs/roles` removes bundled and derived paths from fuzzing and license detection. Test paths remain eligible because fuzz targets commonly use them.
 
-Brief reads commit trees through `history.TreeFS` and reruns only when Brief's changed-file filter identifies an input to one of the emitted tool signals. Package files are parsed when their paths change, and the parse result supplies dependency constraints, pins, Actions references, container images, lockfile resolution, and integrity records. Results are cached by blob OID and path. Shell commands that download or install packages are not yet included in this local package detector. Package-manager detection uses `managers.AffectedDirectories` to rescan only the affected projects. Secret scanning updates changed paths and caches results by blob OID and path because some rules depend on the filename. REUSE metadata changes trigger a full REUSE scan; ordinary changes update the affected file state and coverage count.
+Brief reads commit trees through `history.TreeFS` and reruns only when Brief's changed-file filter identifies an input to one of the emitted tool signals. Package files are parsed when their paths change, and the parse result supplies dependency constraints, pins, Actions references, container images, lockfile resolution, integrity records, and manifest-declared license values or file references. Results are cached by blob OID and path. Shell commands that download or install packages are not yet included in this local package detector. Package-manager detection uses `managers.AffectedDirectories` to rescan only the affected projects. Secret scanning updates changed paths and caches results by blob OID and path because some rules depend on the filename. REUSE metadata changes trigger a full REUSE scan; ordinary changes update the affected file state and coverage count.
 
 ## Related git-pkgs modules
 
-The Scorecard dependency brings a large set of transitive packages and repeatedly parses the same files for related checks. Existing git-pkgs modules already cover several parts of the scan:
+The local detectors share parsers and changed-path caches across related signals:
 
 - [`github.com/git-pkgs/magic`](https://github.com/git-pkgs/magic) detects binary content.
-- [`github.com/git-pkgs/licenses`](https://github.com/git-pkgs/licenses) finds license texts, notices, and SPDX declarations.
-- [`github.com/git-pkgs/manifests`](https://github.com/git-pkgs/manifests) parses Actions, Docker, NuGet, and other dependency files.
+- [`github.com/git-pkgs/licensecheck`](https://github.com/git-pkgs/licensecheck) identifies license text.
+- [`github.com/git-pkgs/manifests`](https://github.com/git-pkgs/manifests) parses package metadata, declared licenses, Actions, Docker, NuGet, and other dependency files.
 - [`github.com/git-pkgs/managers`](https://github.com/git-pkgs/managers) identifies package managers and their manifest or lockfile evidence from commit trees.
 - [`github.com/git-pkgs/sbom`](https://github.com/git-pkgs/sbom) identifies and parses SPDX and CycloneDX JSON documents.
 - [`github.com/git-pkgs/brief`](https://github.com/git-pkgs/brief) detects CI systems, build tools, security tools, and pre-commit runners from an `fs.FS` commit tree.
@@ -171,7 +171,7 @@ The Scorecard dependency brings a large set of transitive packages and repeatedl
 - [`github.com/git-pkgs/roles`](https://github.com/git-pkgs/roles) classifies CI, fuzz, legal, generated, vendored, and packaging paths.
 - [`github.com/git-pkgs/secrets`](https://github.com/git-pkgs/secrets) scans changed blob content with its embedded local rule corpus.
 
-A shared Actions workflow parser could remove the largest remaining duplication. One parsed workflow could feed Dangerous-Workflow, reusable-workflow and script pinning, SAST, Token-Permissions, Packaging, and Gradle wrapper validation.
+Actionlint parses each changed Actions workflow once for Dangerous-Workflow, SAST, and Token-Permissions signals. Package parsing separately records Actions references and their pinning state.
 
 ## Development
 

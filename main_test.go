@@ -40,6 +40,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: example/action@`+longHexActionRef+`
+      - uses: github/codeql-action/analyze@v3
       - run: echo "${{ github.event.issue.title }}"
 `)
 	gitRun(t, repo, "add", ".")
@@ -65,6 +66,7 @@ jobs:
 		"+ Dangerous-Workflow/scriptInjection",
 		"+ Pinned-Dependencies/GitHubAction actions/checkout at .github/workflows/ci.yml = unpinned",
 		"+ Pinned-Dependencies/GitHubAction example/action at .github/workflows/ci.yml = unpinned",
+		"+ SAST/tool CodeQL at .github/workflows/ci.yml",
 		"+ Security-Policy/policy at SECURITY.md:1",
 		"+ Token-Permissions/topLevel",
 		"Remove security policy",
@@ -117,6 +119,10 @@ updates:
 	gitRun(t, repo, "add", ".")
 	gitRun(t, repo, "commit", "-m", "Configure dependency update policy")
 
+	writeFile(t, repo, ".scala-steward.conf", "updates.pin = true\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Configure Scala Steward")
+
 	var stdout, stderr bytes.Buffer
 	if err := run([]string{"log", repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
@@ -129,6 +135,7 @@ updates:
 		"+ Dependency-Update-Config/Dependabot npm at .github/dependabot.yml = directory=/; schedule=cron; cronjob=0 8 * * 1; cooldown=default-days:7",
 		"+ Dependency-Update-Config/Renovate gomod at renovate.json5:1 = enabled",
 		"+ Dependency-Update-Tool/tool Renovate at renovate.json5:1",
+		"+ Dependency-Update-Tool/tool Scala Steward at .scala-steward.conf:1",
 	} {
 		if !strings.Contains(output, expected) {
 			t.Errorf("output missing %q:\n%s", expected, output)
@@ -239,6 +246,148 @@ func TestLogDetectsPackagePostureChanges(t *testing.T) {
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("unexpected detection errors:\n%s", stderr.String())
+	}
+}
+
+func TestLogDetectsLicenseEvidenceAcrossHistory(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.name", "Signals Test")
+	gitRun(t, repo, "config", "user.email", "signals@example.com")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+
+	writeFile(t, repo, "README.md", "# Example\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Initial commit")
+
+	writeFile(t, repo, "Cargo.toml", `[package]
+name = "example"
+version = "1.0.0"
+license = "MIT OR Apache-2.0"
+license-file = "COPYING"
+`)
+	writeFile(t, repo, "NOTICE", "Third-party notices\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Declare licensing")
+
+	writeFile(t, repo, "Cargo.toml", `[package]
+name = "example"
+version = "1.0.1"
+license = "Apache-2.0"
+`)
+	if err := os.Remove(filepath.Join(repo, "NOTICE")); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "add", "-A")
+	gitRun(t, repo, "commit", "-m", "Update licensing")
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"log", "--workers", "1", repo}, &stdout, &stderr); err != nil {
+		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
+	}
+
+	output := stdout.String()
+	for _, expected := range []string{
+		"+ License/declaration MIT OR Apache-2.0 at Cargo.toml",
+		"+ License/file-reference at Cargo.toml = COPYING",
+		"+ License/notice at NOTICE",
+		"- License/declaration MIT OR Apache-2.0 at Cargo.toml",
+		"+ License/declaration Apache-2.0 at Cargo.toml",
+		"- License/file-reference at Cargo.toml = COPYING",
+		"- License/notice at NOTICE",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Errorf("output missing %q:\n%s", expected, output)
+		}
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected detection errors:\n%s", stderr.String())
+	}
+}
+
+func TestLogRetainsWorkflowSignalsWhileWorkflowIsMalformed(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.name", "Signals Test")
+	gitRun(t, repo, "config", "user.email", "signals@example.com")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+
+	writeFile(t, repo, testWorkflowPath, `on: push
+permissions: write-all
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: github/codeql-action/analyze@v3
+`)
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Add workflow")
+
+	writeFile(t, repo, testWorkflowPath, "jobs:\n  scan: [\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Break workflow")
+
+	writeFile(t, repo, "README.md", "# Unrelated change\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Change documentation")
+
+	writeFile(t, repo, testWorkflowPath, `on: push
+permissions: read-all
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps: []
+`)
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Repair workflow")
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"log", testJSONLFlag, testStatsFlag, "--workers", "1", repo}, &stdout, &stderr); err != nil {
+		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
+	}
+
+	var records []jsonlRecord
+	for _, line := range strings.Split(strings.TrimSpace(stdout.String()), "\n") {
+		var record jsonlRecord
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatalf("decode JSONL: %v\n%s", err, line)
+		}
+		records = append(records, record)
+	}
+	broken := findJSONLRecord(t, records, "Break workflow")
+	if len(broken.Errors) != 1 || broken.Errors[0].Check != detectorWorkflows {
+		t.Fatalf("broken workflow errors = %#v", broken.Errors)
+	}
+	for _, change := range broken.Changes {
+		if change.Check == checkTokenPermissions || change.Check == checkSAST || change.Check == checkDangerousWorkflow {
+			t.Errorf("malformed workflow changed retained signal: %#v", change)
+		}
+	}
+	repaired := findJSONLRecord(t, records, "Repair workflow")
+	if !containsExactJSONLChange(repaired.Changes, jsonlChange{
+		Change: "removed", Check: checkTokenPermissions, Kind: permissionKindTopLevel,
+		Value: "write-all", Path: testWorkflowPath, Line: 2,
+	}) {
+		t.Errorf("repaired record did not remove retained permission: %#v", repaired.Changes)
+	}
+	if len(repaired.Errors) != 1 || repaired.Errors[0] != (errorChange{
+		Check: detectorWorkflows, Message: "detection recovered",
+	}) {
+		t.Fatalf("repaired workflow errors = %#v", repaired.Errors)
+	}
+	if !strings.Contains(stderr.String(), detectorWorkflows+": parse workflow "+testWorkflowPath) ||
+		!strings.Contains(stderr.String(), detectorWorkflows+": detection recovered") {
+		t.Fatalf("workflow error output:\n%s", stderr.String())
+	}
+	var workflowStats string
+	for _, line := range strings.Split(stderr.String(), "\n") {
+		if strings.Contains(line, "signals: Workflows ") {
+			workflowStats = line
+			break
+		}
+	}
+	if !strings.Contains(workflowStats, "runs=3 full=2 partial=1 skipped=1") {
+		t.Fatalf("workflow stats = %q\nstderr:\n%s", workflowStats, stderr.String())
 	}
 }
 
@@ -405,7 +554,7 @@ func TestLogDetectsLocalToolingSecretsAndREUSEAcrossHistory(t *testing.T) {
 	gitRun(t, repo, "commit", "-m", "Remove local security evidence")
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"log", "--jsonl", "--workers", "1", repo}, &stdout, &stderr); err != nil {
+	if err := run([]string{"log", testJSONLFlag, "--workers", "1", repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 	if strings.Contains(stdout.String(), token) {
@@ -430,7 +579,7 @@ func TestLogDetectsLocalToolingSecretsAndREUSEAcrossHistory(t *testing.T) {
 		{Change: "added", Check: checkSecurityTool, Kind: testSecurityScanKind, Name: testSemgrepName, Path: testSemgrepConfigPath},
 		{Change: "added", Check: checkBuild, Kind: "Make"},
 		{Change: "added", Check: checkSecret, Kind: "github-pat", Value: "[redacted]", Path: "config.yml", Line: 1},
-		{Change: "added", Check: checkREUSE, Kind: "declaration", Value: "MIT", Path: "licensed.txt"},
+		{Change: "added", Check: checkREUSE, Kind: "declaration", Value: testMITLicenseID, Path: "licensed.txt"},
 	}
 	for _, expected := range expectedAdditions {
 		if !containsExactJSONLChange(added.Changes, expected) {
@@ -713,19 +862,50 @@ func TestLogRebuildsLanguagesAtShallowBoundary(t *testing.T) {
 	writeFile(t, repo, ".git/shallow", boundary+"\n")
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"log", "--stats", "--workers", "1", repo}, &stdout, &stderr); err != nil {
+	if err := run([]string{"log", testStatsFlag, "--workers", "1", repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 
-	var fuzzingStats string
+	var briefStats string
 	for _, line := range strings.Split(stderr.String(), "\n") {
-		if strings.HasPrefix(line, "signals: Fuzzing") {
-			fuzzingStats = line
+		if strings.HasPrefix(line, "signals: Brief") {
+			briefStats = line
 			break
 		}
 	}
-	if !strings.Contains(fuzzingStats, "runs=3 full=3 partial=0") {
-		t.Fatalf("Fuzzing stats = %q, want three full scans\nstderr:\n%s", fuzzingStats, stderr.String())
+	if !strings.Contains(briefStats, "runs=3 full=3 partial=0") {
+		t.Fatalf("Brief stats = %q, want three full scans\nstderr:\n%s", briefStats, stderr.String())
+	}
+}
+
+func TestLogRebuildsBriefLanguagesForManifestChanges(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.name", "Signals Test")
+	gitRun(t, repo, "config", "user.email", "signals@example.com")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+
+	writeFile(t, repo, "package.json", "{\"devDependencies\":{}}\n")
+	gitRun(t, repo, "add", "package.json")
+	gitRun(t, repo, "commit", "-m", "Add package manifest")
+	writeFile(t, repo, "package.json", "{\"devDependencies\":{\"typescript\":\"5.0.0\"}}\n")
+	gitRun(t, repo, "add", "package.json")
+	gitRun(t, repo, "commit", "-m", "Add TypeScript")
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"log", testStatsFlag, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
+		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
+	}
+
+	var briefStats string
+	for _, line := range strings.Split(stderr.String(), "\n") {
+		if strings.HasPrefix(line, "signals: Brief") {
+			briefStats = line
+			break
+		}
+	}
+	if !strings.Contains(briefStats, "runs=2 full=2 partial=0") {
+		t.Fatalf("Brief stats = %q, want two full scans\nstderr:\n%s", briefStats, stderr.String())
 	}
 }
 
@@ -745,7 +925,7 @@ func TestLogWritesJSONL(t *testing.T) {
 	gitRunAt(t, repo, "2024-02-01T12:00:00Z", "commit", "-m", "Add security policy")
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"log", "--jsonl", "--workers", "1", repo}, &stdout, &stderr); err != nil {
+	if err := run([]string{"log", testJSONLFlag, "--workers", "1", repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 
@@ -778,6 +958,20 @@ func TestLogWritesJSONL(t *testing.T) {
 	if stderr.Len() != 0 {
 		t.Fatalf("unexpected detection errors:\n%s", stderr.String())
 	}
+
+	got := strings.Replace(
+		stdout.String(),
+		`"commit":"`+record.Commit+`"`,
+		`"commit":"`+strings.Repeat("0", 40)+`"`,
+		1,
+	)
+	want, err := os.ReadFile("testdata/change.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != string(want) {
+		t.Errorf("JSONL output changed\ngot:  %s\nwant: %s", got, want)
+	}
 }
 
 func TestLogWritesBoundarySnapshots(t *testing.T) {
@@ -804,7 +998,7 @@ func TestLogWritesBoundarySnapshots(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if err := run([]string{
 		"log",
-		"--jsonl",
+		testJSONLFlag,
 		"--snapshots",
 		"--after", "2024-02-01",
 		"--before", "2024-03-01",
@@ -975,9 +1169,9 @@ func TestRunPropagatesWriterErrors(t *testing.T) {
 	}{
 		{name: "version", args: []string{"version"}, stdout: failingWriter{}, stderr: io.Discard},
 		{name: "text", args: []string{"log", repo}, stdout: failingWriter{}, stderr: io.Discard},
-		{name: "JSONL", args: []string{"log", "--jsonl", repo}, stdout: failingWriter{}, stderr: io.Discard},
+		{name: "JSONL", args: []string{"log", testJSONLFlag, repo}, stdout: failingWriter{}, stderr: io.Discard},
 		{name: "progress", args: []string{"log", "--progress", "1", repo}, stdout: io.Discard, stderr: failingWriter{}},
-		{name: "stats", args: []string{"log", "--stats", repo}, stdout: io.Discard, stderr: failingWriter{}},
+		{name: "stats", args: []string{"log", testStatsFlag, repo}, stdout: io.Discard, stderr: failingWriter{}},
 	}
 
 	for _, test := range tests {

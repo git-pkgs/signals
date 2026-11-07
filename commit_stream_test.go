@@ -36,7 +36,7 @@ func TestLogWritesCommitEvents(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	if err := run([]string{
-		"log", "--jsonl", "--after", "2024-02-01", "--before", "2024-03-01", repo,
+		"log", testJSONLFlag, "--after", "2024-02-01", "--before", "2024-03-01", repo,
 	}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
@@ -96,7 +96,7 @@ func TestLogSnapshotsIncludeCommitMetrics(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	if err := run([]string{
-		"log", "--jsonl", "--snapshots",
+		"log", testJSONLFlag, "--snapshots",
 		"--after", "2024-02-01", "--before", "2024-03-01", repo,
 	}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
@@ -145,7 +145,7 @@ func TestLogSnapshotsHandleNonMonotonicCommitterDates(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	if err := run([]string{
-		"log", "--jsonl", "--snapshots",
+		"log", testJSONLFlag, "--snapshots",
 		"--after", "2024-04-10", "--before", "2024-05-01", repo,
 	}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
