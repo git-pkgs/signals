@@ -428,6 +428,21 @@ func TestRepositoryFileSignalsUsesBriefChangelogPaths(t *testing.T) {
 	}
 }
 
+func TestRepositoryFileSignalsDetectsSubresourceIntegrity(t *testing.T) {
+	markup := `<script src="` + testCDNScript + `" integrity="` + testSRI + `"></script>`
+	signals := repositorySignals(t, testMarkupPath, []byte(markup))
+	wanted := Signal{
+		Check: checkSubresourceIntegrity,
+		Kind:  "protected",
+		Name:  testCDNScript,
+		Value: testSRI,
+		Path:  testMarkupPath,
+	}
+	if !containsExactSignal(signals, wanted) {
+		t.Fatalf("signals = %#v", signals)
+	}
+}
+
 func TestRepositoryFileSignalsDoesNotTreatSourceNamesAsLegalEvidence(t *testing.T) {
 	for _, filePath := range []string{"notice.go", "licenses/_spdx.py"} {
 		if signals := repositorySignals(t, filePath, []byte("package example\n")); len(signals) != 0 {

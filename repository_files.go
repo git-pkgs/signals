@@ -280,6 +280,16 @@ func repositoryFileSignalsFromFS(
 	}
 	signals = append(signals, parsed...)
 
+	if subresourceMarkupPath(filePath) {
+		parsed, err := scanRepositoryFile(tree, filePath, func(reader io.Reader) ([]Signal, error) {
+			return subresourceIntegritySignals(filePath, reader)
+		})
+		if err != nil {
+			return nil, err
+		}
+		signals = append(signals, parsed...)
+	}
+
 	if fuzzingFile(filePath) {
 		parsed, err := scanRepositoryFile(tree, filePath, func(reader io.Reader) ([]Signal, error) {
 			return fuzzingSignals(filePath, reader)
@@ -1207,6 +1217,7 @@ func (d *localDetectors) runRepositoryFiles(
 	checks := []string{
 		checkBinaryArtifacts, checkCertificate, checkFuzzing, checkLicense, checkSARIF, checkSAST, checkSBOM,
 		checkSecurityChangelog, checkSecurityDocumentation, checkSecurityPolicy, checkShellDependency,
+		checkSubresourceIntegrity,
 	}
 	if forceFull {
 		for _, check := range checks {
