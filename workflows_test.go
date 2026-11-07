@@ -8,6 +8,11 @@ import (
 	githistory "github.com/git-pkgs/history"
 )
 
+const (
+	testPermissionRead  = "read"
+	testPermissionWrite = "write"
+)
+
 func TestWorkflowFileSignalsDetectsWorkflowSecurityPosture(t *testing.T) {
 	signals, err := workflowFileSignals(testWorkflowPath, []byte(`name: Security checks
 on: pull_request_target
@@ -56,7 +61,7 @@ jobs:
 			Check: checkTokenPermissions,
 			Kind:  permissionKindTopLevel,
 			Name:  "contents",
-			Value: "read",
+			Value: testPermissionRead,
 			Path:  testWorkflowPath,
 			Line:  4,
 		},
@@ -64,7 +69,7 @@ jobs:
 			Check: checkTokenPermissions,
 			Kind:  permissionKindTopLevel,
 			Name:  "issues",
-			Value: "write",
+			Value: testPermissionWrite,
 			Path:  testWorkflowPath,
 			Line:  5,
 		},
@@ -72,7 +77,7 @@ jobs:
 			Check: checkTokenPermissions,
 			Kind:  permissionKindJobLevel,
 			Name:  "contents (Build)",
-			Value: "write",
+			Value: testPermissionWrite,
 			Path:  testWorkflowPath,
 			Line:  10,
 		},
@@ -272,6 +277,34 @@ jobs: {}
 		if signal.Path == testWorkflowPath {
 			t.Fatalf("deleted workflow signal remains: %#v", signal)
 		}
+	}
+}
+
+func TestRunWorkflowsKeepsManifestProvenanceOnFullScan(t *testing.T) {
+	manifest := Signal{
+		Check: checkPackageProvenance,
+		Kind:  packagingNameNPM,
+		Name:  testPackageName,
+		Path:  "package.json",
+	}
+	workflow := Signal{
+		Check: checkPackageProvenance,
+		Kind:  packageProvenanceNPMFlag,
+		Name:  "publish",
+		Path:  testWorkflowPath,
+	}
+	current := emptyCommitState()
+	addSignals(current.signals, []Signal{manifest, workflow})
+	detectors := &localDetectors{workflowCache: make(map[workflowCacheKey][]Signal)}
+	stats := &scanStats{detectors: map[string]*detectorStats{detectorWorkflows: {}}}
+
+	detectors.runWorkflows(fstest.MapFS{}, nil, true, true, &current, stats)
+
+	if !hasSignal(current.signals, manifest) {
+		t.Fatalf("manifest provenance was removed: %#v", current.signals)
+	}
+	if hasSignal(current.signals, workflow) {
+		t.Fatalf("workflow provenance remains: %#v", current.signals)
 	}
 }
 

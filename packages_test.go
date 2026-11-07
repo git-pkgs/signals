@@ -74,7 +74,7 @@ func TestPackageFileSignalsFindsPublicationProvenance(t *testing.T) {
 				if !test.found {
 					t.Fatalf("unexpected provenance signal: %#v", signal)
 				}
-				if signal.Kind != "npm" || signal.Name != "example" || signal.Value != test.value {
+				if signal.Kind != packagingNameNPM || signal.Name != testPackageName || signal.Value != test.value {
 					t.Fatalf("provenance signal = %#v", signal)
 				}
 				return
@@ -88,18 +88,18 @@ func TestPackageFileSignalsFindsPublicationProvenance(t *testing.T) {
 
 func TestPackageFileSignalsFindsNPMRCProvenance(t *testing.T) {
 	signals := packageFileSignals(".npmrc", []byte("provenance=true\n"))
-	signal := findPackageSignal(t, signals, checkPackageProvenance, "npm", "")
+	signal := findPackageSignal(t, signals, checkPackageProvenance, packagingNameNPM, "")
 	if signal.Value != packageProvenanceEnabled {
 		t.Fatalf("provenance signal = %#v", signal)
 	}
-	findPackageSignal(t, signals, checkPackageFile, "supplement", "npm")
+	findPackageSignal(t, signals, checkPackageFile, "supplement", packagingNameNPM)
 }
 
 func TestRemovePackageSignalsKeepsWorkflowProvenance(t *testing.T) {
 	manifest := Signal{
 		Check: checkPackageProvenance,
-		Kind:  "npm",
-		Name:  "example",
+		Kind:  packagingNameNPM,
+		Name:  testPackageName,
 		Path:  packageJSONPath,
 	}
 	workflow := Signal{
@@ -199,7 +199,7 @@ func TestPackageFileSignalsClassifiesContainerDigests(t *testing.T) {
 	const digest = "sha256:9cb31e2e37ea84c54fd72af82d7d454d24f714bd7ee2b7eb350f3231b3e1f5a0"
 	signals := packageFileSignals("Dockerfile", []byte("FROM ruby:3.4\nFROM alpine@"+digest+"\n"))
 
-	pin := findPackageSignal(t, signals, checkDependencyPin, "docker", "pkg:docker/alpine")
+	pin := findPackageSignal(t, signals, checkDependencyPin, dockerName, "pkg:docker/alpine")
 	if pin.Value != digest {
 		t.Errorf("container pin = %q, want %s", pin.Value, digest)
 	}
@@ -211,11 +211,11 @@ func TestPackageFileSignalsClassifiesContainerDigests(t *testing.T) {
 	if unpinned.Value != "unpinned" {
 		t.Errorf("unpinned container value = %q", unpinned.Value)
 	}
-	constraint := findPackageSignal(t, signals, checkDependencyConstraint, "docker", "pkg:docker/ruby")
+	constraint := findPackageSignal(t, signals, checkDependencyConstraint, dockerName, "pkg:docker/ruby")
 	if constraint.Value != "3.4" {
 		t.Errorf("container constraint = %q, want 3.4", constraint.Value)
 	}
-	summary := findPackageSignal(t, signals, checkDependencyPinning, "docker", "")
+	summary := findPackageSignal(t, signals, checkDependencyPinning, dockerName, "")
 	if summary.Value != exactAndRangedSummary {
 		t.Errorf("container pinning summary = %q", summary.Value)
 	}

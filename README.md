@@ -123,7 +123,7 @@ Nine checks retain names used by Scorecard, but their evidence is detected by lo
 | SAST | Known Actions, Sonar configuration, and Qodana configuration | Successful check runs |
 | SBOM | SPDX and CycloneDX documents detected from content, plus named candidates that cannot be parsed | Release assets |
 | Security-Policy | Accepted policy paths with extracted email addresses and links | Inherited policy from the organization `.github` repository |
-| Token-Permissions | Top-level and job-level Actions permission declarations parsed with Actionlint | None |
+| Token-Permissions | Top-level and job-level Actions permission declarations parsed with Actionlint, with reusable definitions and calls identified separately | None |
 
 The scan performs no network requests. Detector errors are reported on stderr. The previous successful state for that detector remains in place until detection succeeds again.
 
@@ -145,6 +145,11 @@ The additional detectors use the same persistent signal model:
 | Dependency-Pinning | Exact, ranged, unparsed, and resolved dependency counts from manifests and lockfiles |
 | Lockfile-Integrity | Dependencies with declared integrity metadata compared with the total entries in a lockfile |
 | Pinned-Dependencies | Repository-based `uses` steps pinned to commit hashes and container images pinned to SHA-256 digests, parsed from changed workflows, Dockerfiles, and Compose files |
+| Cache-Mode | Explicit workflow and job cache access modes parsed from Actions workflows |
+| Job-Timeout | Configured Actions job timeouts, including expression-backed values |
+| Packaging | Literal packaging and publication commands or known publication Actions; presence does not show that a workflow ran |
+| Package-Provenance | Explicit npm provenance flags or environment settings, and PyPI publication configured with an OIDC token |
+| Runner-Selection | Explicit self-hosted runner labels, runner groups, and dynamic runner expressions in GitHub Actions jobs |
 | Package-Parse | Package files that were identified but could not be parsed |
 | Secret | Findings from the embedded `git-pkgs/secrets` rule corpus; output contains `[redacted]` in place of the credential |
 | REUSE | Per-file SPDX license declarations, REUSE.toml or DEP5 metadata, and the number of non-empty covered files with both license and copyright information |
@@ -172,7 +177,7 @@ The local detectors share parsers and changed-path caches across related signals
 - [`github.com/git-pkgs/roles`](https://github.com/git-pkgs/roles) classifies CI, fuzz, legal, generated, vendored, and packaging paths.
 - [`github.com/git-pkgs/secrets`](https://github.com/git-pkgs/secrets) scans changed blob content with its embedded local rule corpus.
 
-Actionlint parses each changed Actions workflow once for Dangerous-Workflow, SAST, and Token-Permissions signals. Package parsing separately records Actions references and their pinning state.
+Actionlint parses each changed Actions workflow once for Dangerous-Workflow, SAST, Token-Permissions, Cache-Mode, Job-Timeout, Packaging, Package-Provenance, and Runner-Selection signals. Package parsing separately records Actions references and their pinning state. Packaging observations cover known Actions and literal commands in `run:` steps without treating their presence as evidence of a successful workflow run. Package provenance requires an explicit npm setting, or an OIDC-enabled PyPI publication without a configured password or uv token. Runner observations record configuration without determining which machine handled a particular job.
 
 ## Development
 

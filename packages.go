@@ -14,6 +14,7 @@ import (
 )
 
 const (
+	dockerName                = "docker"
 	detectorPackages          = "Packages"
 	checkPackageFile          = "Package-File"
 	checkDependencyConstraint = "Dependency-Constraint"
@@ -269,7 +270,7 @@ func classifyDependencyPin(version, ecosystem string) (string, bool, bool) {
 	switch ecosystem {
 	case "github-actions":
 		return version, len(version) == 40 && isHex(version), true
-	case "docker":
+	case dockerName:
 		digest, ok := strings.CutPrefix(version, "sha256:")
 		return version, ok && len(digest) == 64 && isHex(digest), true
 	default:
@@ -301,7 +302,7 @@ func pinnedDependencySignal(
 	switch declaration.Ecosystem {
 	case "github-actions":
 		kind = "GitHubAction"
-	case "docker":
+	case dockerName:
 		kind = "containerImage"
 	default:
 		return Signal{}, false
@@ -394,7 +395,7 @@ func nonzeroOID(oid string) string {
 func removePackageSignals(signals map[string]Signal, paths map[string]bool) {
 	for key, signal := range signals {
 		owned := packageChecks[signal.Check] ||
-			signal.Check == checkPackageProvenance && signal.Kind == "npm" ||
+			signal.Check == checkPackageProvenance && signal.Kind == packagingNameNPM ||
 			signal.Check == checkLicense &&
 				(signal.Kind == signalKindDeclaration || signal.Kind == signalKindFileReference)
 		if owned && (paths == nil || paths[signal.Path]) {
