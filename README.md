@@ -1,6 +1,6 @@
 # signals
 
-A command for tracing security-relevant evidence stored in Git across repository history. It shows when detected evidence appears, changes, or disappears, with the commit and path behind each change. `signals` walks commit trees with [`github.com/git-pkgs/history`](https://github.com/git-pkgs/history). Local parsers detect workflow risks and permissions, artifact-provenance configuration, CI and security tools, secrets, REUSE metadata, package managers, manifests, lockfiles, dependency pinning, update configuration, licenses, SBOMs, fuzzers, and binary artifacts. Commit data adds dependency-bot and signature events plus contributor, maintenance, review, and signing metrics. The output contains the evidence and its provenance without calculating a score. The scan reads local Git objects, with forge APIs, release APIs, credential validation, and external services disabled.
+A command for tracing security-relevant evidence stored in Git across repository history. It shows when detected evidence appears, changes, or disappears, with the commit and path behind each change. `signals` walks commit trees with [`github.com/git-pkgs/history`](https://github.com/git-pkgs/history). Local parsers detect workflow risks and permissions, artifact-provenance configuration, CI and security tools, threat surface, secrets, REUSE metadata, package managers, manifests, lockfiles, dependency pinning, update configuration, licenses, SBOMs, fuzzers, and binary artifacts. Commit data adds dependency-bot and signature events plus contributor, maintenance, review, and signing metrics. The output contains the evidence and its provenance without calculating a score. The scan reads local Git objects, with forge APIs, release APIs, credential validation, and external services disabled.
 
 The local-only timeline answers questions about when repository evidence changed. Examples include:
 
@@ -127,7 +127,7 @@ Nine checks retain names used by Scorecard, but their evidence is detected by lo
 
 The scan performs no network requests. Detector errors are reported on stderr. The previous successful state for that detector remains in place until detection succeeds again.
 
-The additional detectors use the same persistent signal model:
+The additional detectors use the same persistent signal model. A threat-surface signal means the detected component makes that threat category relevant to the project. It does not identify a vulnerable version, an exploit, or a call to a dangerous API.
 
 | Check | Local evidence |
 | --- | --- |
@@ -135,6 +135,7 @@ The additional detectors use the same persistent signal model:
 | CI | CI configuration detected by the Brief knowledge base, including GitHub Actions, GitLab CI, Azure Pipelines, CircleCI, Jenkins, Buildkite, Drone, and Travis CI |
 | Build | Tools classified as build tools by Brief, including Make, CMake, Meson, Bazel, Buck, and language-specific build tools |
 | Security-Tool | Security tools detected by Brief, with its taxonomy function retained as the signal kind |
+| Threat-Surface | Threat categories mapped by Brief from detected languages, package managers, application platforms, libraries, and tools; records the threat ID, introducing component, and CWE |
 | Secrets-Management | SOPS configuration |
 | Pre-Commit | pre-commit, Lefthook, Husky, and Overcommit configuration |
 | Dependency-Update-Config | Dependabot and Renovate configuration, including package managers, directories, schedules, cooldowns, groups, and semantic configuration changes |

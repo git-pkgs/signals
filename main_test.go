@@ -651,6 +651,60 @@ func TestLogUsesLanguagesAndRolesForFuzzing(t *testing.T) {
 	}
 }
 
+func TestLogTracksThreatSurfaceAcrossHistory(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.name", "Signals Test")
+	gitRun(t, repo, "config", "user.email", "signals@example.com")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+
+	writeFile(t, repo, "README.md", "# example\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Initial commit")
+
+	writeFile(t, repo, "Gemfile", "source \"https://rubygems.org\"\ngem \"rails\"\n")
+	gitRun(t, repo, "add", "Gemfile")
+	gitRun(t, repo, "commit", "-m", "Add Rails")
+
+	if err := os.Remove(filepath.Join(repo, "Gemfile")); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "add", "-A")
+	gitRun(t, repo, "commit", "-m", "Remove Rails")
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"log", testJSONLFlag, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
+		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
+	}
+	var records []jsonlRecord
+	for _, line := range strings.Split(strings.TrimSpace(stdout.String()), "\n") {
+		var record jsonlRecord
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatalf("decode JSONL: %v\n%s", err, line)
+		}
+		records = append(records, record)
+	}
+	added := findJSONLRecord(t, records, "Add Rails")
+	removed := findJSONLRecord(t, records, "Remove Rails")
+	wanted := jsonlChange{
+		Check: checkThreatSurface,
+		Kind:  testThreatXSS,
+		Name:  "Rails",
+		Value: testThreatCWE,
+	}
+	wanted.Change = changeName('+')
+	if !containsExactJSONLChange(added.Changes, wanted) {
+		t.Fatalf("added record missing %#v:\n%s", wanted, stdout.String())
+	}
+	wanted.Change = changeName('-')
+	if !containsExactJSONLChange(removed.Changes, wanted) {
+		t.Fatalf("removed record missing %#v:\n%s", wanted, stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected detection errors:\n%s", stderr.String())
+	}
+}
+
 func TestLogDetectsLocalToolingSecretsAndREUSEAcrossHistory(t *testing.T) {
 	const prefixBeyondCommonScanLimit = 64*1024 + 1
 
