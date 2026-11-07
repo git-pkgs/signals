@@ -702,12 +702,46 @@ func unmatchedLineSignals(removed, added []Signal) ([]Signal, []Signal) {
 	sort.Slice(removed, func(i, j int) bool { return removed[i].Line < removed[j].Line })
 	sort.Slice(added, func(i, j int) bool { return added[i].Line < added[j].Line })
 	if len(removed) > len(added) {
-		return removed[:len(removed)-len(added)], nil
+		return unmatchedByNearestLine(removed, added), nil
 	}
 	if len(added) > len(removed) {
-		return nil, added[:len(added)-len(removed)]
+		return nil, unmatchedByNearestLine(added, removed)
 	}
 	return nil, nil
+}
+
+func unmatchedByNearestLine(larger, smaller []Signal) []Signal {
+	matched := make([]bool, len(larger))
+	for _, signal := range smaller {
+		match := -1
+		var nearest uint
+		for i, candidate := range larger {
+			if matched[i] {
+				continue
+			}
+			distance := lineDistance(signal.Line, candidate.Line)
+			if match == -1 || distance < nearest {
+				match = i
+				nearest = distance
+			}
+		}
+		matched[match] = true
+	}
+
+	unmatched := make([]Signal, 0, len(larger)-len(smaller))
+	for i, signal := range larger {
+		if !matched[i] {
+			unmatched = append(unmatched, signal)
+		}
+	}
+	return unmatched
+}
+
+func lineDistance(a, b uint) uint {
+	if a > b {
+		return a - b
+	}
+	return b - a
 }
 
 type errorChange struct {

@@ -44,6 +44,28 @@ func TestDiffSignalsKeepsDuplicateCountChanges(t *testing.T) {
 	}
 }
 
+func TestDiffSignalsMatchesMovedDuplicatesByNearestLine(t *testing.T) {
+	signal := Signal{
+		Check: checkTokenPermissions,
+		Kind:  permissionKindJobLevel,
+		Name:  testJobName,
+		Value: testReadAll,
+		Path:  testWorkflowPath,
+	}
+
+	previous := signalMap(signalAtLine(signal, 10))
+	current := signalMap(signalAtLine(signal, 9), signalAtLine(signal, 20))
+	added := diffSignals(previous, current)
+	if len(added) != 1 || added[0].Marker != '+' || added[0].Signal.Line != 20 {
+		t.Fatalf("added duplicate changes = %#v", added)
+	}
+
+	removed := diffSignals(current, previous)
+	if len(removed) != 1 || removed[0].Marker != '-' || removed[0].Signal.Line != 20 {
+		t.Fatalf("removed duplicate changes = %#v", removed)
+	}
+}
+
 func TestDiffSignalsKeepsSemanticChangesAcrossLineMoves(t *testing.T) {
 	previous := signalMap(Signal{
 		Check: checkTokenPermissions,
