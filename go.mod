@@ -11,7 +11,7 @@ require (
 	github.com/git-pkgs/magic v0.6.0
 	github.com/git-pkgs/mailmap v0.1.1
 	github.com/git-pkgs/managers v0.13.0
-	github.com/git-pkgs/manifests v0.13.1-0.20261107160344-a1b5083bc22b
+	github.com/git-pkgs/manifests v0.13.1-0.20261107212808-69ba49d733ae
 	github.com/git-pkgs/reuse v0.2.0
 	github.com/git-pkgs/roles v0.1.3
 	github.com/git-pkgs/sbom v0.1.10-0.20261107160107-38436af679c6

@@ -52,6 +52,77 @@ license-file = "COPYING"
 	}
 }
 
+func TestPackageFileSignalsFindsPublicationProvenance(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		value   string
+		found   bool
+	}{
+		{name: packageProvenanceEnabled, content: `{"name":"example","publishConfig":{"provenance":true}}`, value: packageProvenanceEnabled, found: true},
+		{name: packageProvenanceDisabled, content: `{"name":"example","publishConfig":{"provenance":false}}`, value: packageProvenanceDisabled, found: true},
+		{name: "absent", content: `{"name":"example"}`},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			signals := packageFileSignals(packageJSONPath, []byte(test.content))
+			for _, signal := range signals {
+				if signal.Check != checkPackageProvenance {
+					continue
+				}
+				if !test.found {
+					t.Fatalf("unexpected provenance signal: %#v", signal)
+				}
+				if signal.Kind != "npm" || signal.Name != "example" || signal.Value != test.value {
+					t.Fatalf("provenance signal = %#v", signal)
+				}
+				return
+			}
+			if test.found {
+				t.Fatalf("provenance signal missing: %#v", signals)
+			}
+		})
+	}
+}
+
+func TestPackageFileSignalsFindsNPMRCProvenance(t *testing.T) {
+	signals := packageFileSignals(".npmrc", []byte("provenance=true\n"))
+	signal := findPackageSignal(t, signals, checkPackageProvenance, "npm", "")
+	if signal.Value != packageProvenanceEnabled {
+		t.Fatalf("provenance signal = %#v", signal)
+	}
+	findPackageSignal(t, signals, checkPackageFile, "supplement", "npm")
+}
+
+func TestRemovePackageSignalsKeepsWorkflowProvenance(t *testing.T) {
+	manifest := Signal{
+		Check: checkPackageProvenance,
+		Kind:  "npm",
+		Name:  "example",
+		Path:  packageJSONPath,
+	}
+	workflow := Signal{
+		Check: checkPackageProvenance,
+		Kind:  "npm-flag",
+		Name:  "publish",
+		Path:  ".github/workflows/release.yml",
+	}
+	signals := map[string]Signal{
+		signalKey(manifest): manifest,
+		signalKey(workflow): workflow,
+	}
+
+	removePackageSignals(signals, nil)
+
+	if hasSignal(signals, manifest) {
+		t.Fatalf("manifest provenance remains: %#v", signals)
+	}
+	if !hasSignal(signals, workflow) {
+		t.Fatalf("workflow provenance was removed: %#v", signals)
+	}
+}
+
 func TestPackageAndRepositoryLicenseSignalsHaveSeparateOwnership(t *testing.T) {
 	signals := map[string]Signal{}
 	for _, signal := range []Signal{

@@ -292,6 +292,43 @@ func TestLogDetectsPackagePostureChanges(t *testing.T) {
 	}
 }
 
+func TestLogDetectsPackageProvenanceChanges(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.name", "Signals Test")
+	gitRun(t, repo, "config", "user.email", "signals@example.com")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+
+	writeFile(t, repo, packageJSONPath, `{"name":"example"}`)
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Add package")
+
+	writeFile(t, repo, packageJSONPath, `{"name":"example","publishConfig":{"provenance":true}}`)
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Enable package provenance")
+
+	writeFile(t, repo, packageJSONPath, `{"name":"example","publishConfig":{"provenance":false}}`)
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Disable package provenance")
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"log", repo}, &stdout, &stderr); err != nil {
+		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
+	}
+	for _, expected := range []string{
+		"+ Package-Provenance/npm example at package.json = " + packageProvenanceEnabled,
+		"- Package-Provenance/npm example at package.json = " + packageProvenanceEnabled,
+		"+ Package-Provenance/npm example at package.json = " + packageProvenanceDisabled,
+	} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Errorf("output missing %q:\n%s", expected, stdout.String())
+		}
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected detector errors:\n%s", stderr.String())
+	}
+}
+
 func TestLogDetectsLicenseEvidenceAcrossHistory(t *testing.T) {
 	repo := t.TempDir()
 	gitRun(t, repo, "init", "-b", "main")
