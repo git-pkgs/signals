@@ -8,6 +8,7 @@ import (
 const (
 	checkAgentSkill            = "Agent-Skill"
 	checkArtifactProvenance    = "Artifact-Provenance"
+	checkArtifactSigning       = "Artifact-Signing"
 	checkBinaryArtifacts       = "Binary-Artifacts"
 	checkCertificate           = "Certificate"
 	checkDangerousWorkflow     = "Dangerous-Workflow"
@@ -17,6 +18,7 @@ const (
 	checkSARIF                 = "SARIF"
 	checkSAST                  = "SAST"
 	checkSBOM                  = "SBOM"
+	checkSBOMGeneration        = "SBOM-Generation"
 	checkSecurityChangelog     = "Security-Changelog"
 	checkSecurityDocumentation = "Security-Documentation"
 	checkSecurityPolicy        = "Security-Policy"
