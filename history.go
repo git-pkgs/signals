@@ -640,14 +640,34 @@ func printStats(writer io.Writer, stats *scanStats) error {
 }
 
 func diffSignals(previous, current map[string]Signal) []signalChange {
-	changes := make([]signalChange, 0)
+	removed := make(map[signalIdentity][]Signal)
+	added := make(map[signalIdentity][]Signal)
 	for key, signal := range previous {
 		if _, ok := current[key]; !ok {
-			changes = append(changes, signalChange{Marker: '-', Signal: signal})
+			identity := newSignalIdentity(signal)
+			removed[identity] = append(removed[identity], signal)
 		}
 	}
 	for key, signal := range current {
 		if _, ok := previous[key]; !ok {
+			identity := newSignalIdentity(signal)
+			added[identity] = append(added[identity], signal)
+		}
+	}
+
+	changes := make([]signalChange, 0)
+	for identity, removedSignals := range removed {
+		unmatchedRemoved, unmatchedAdded := unmatchedLineSignals(removedSignals, added[identity])
+		for _, signal := range unmatchedRemoved {
+			changes = append(changes, signalChange{Marker: '-', Signal: signal})
+		}
+		for _, signal := range unmatchedAdded {
+			changes = append(changes, signalChange{Marker: '+', Signal: signal})
+		}
+		delete(added, identity)
+	}
+	for _, addedSignals := range added {
+		for _, signal := range addedSignals {
 			changes = append(changes, signalChange{Marker: '+', Signal: signal})
 		}
 	}
@@ -658,6 +678,36 @@ func diffSignals(previous, current map[string]Signal) []signalChange {
 		return signalKey(changes[i].Signal) < signalKey(changes[j].Signal)
 	})
 	return changes
+}
+
+type signalIdentity struct {
+	check string
+	kind  string
+	name  string
+	value string
+	path  string
+}
+
+func newSignalIdentity(signal Signal) signalIdentity {
+	return signalIdentity{
+		check: signal.Check,
+		kind:  signal.Kind,
+		name:  signal.Name,
+		value: signal.Value,
+		path:  signal.Path,
+	}
+}
+
+func unmatchedLineSignals(removed, added []Signal) ([]Signal, []Signal) {
+	sort.Slice(removed, func(i, j int) bool { return removed[i].Line < removed[j].Line })
+	sort.Slice(added, func(i, j int) bool { return added[i].Line < added[j].Line })
+	if len(removed) > len(added) {
+		return removed[:len(removed)-len(added)], nil
+	}
+	if len(added) > len(removed) {
+		return nil, added[:len(added)-len(removed)]
+	}
+	return nil, nil
 }
 
 type errorChange struct {

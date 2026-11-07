@@ -81,6 +81,49 @@ jobs:
 	}
 }
 
+func TestLogIgnoresSignalLineMoves(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.name", "Signals Test")
+	gitRun(t, repo, "config", "user.email", "signals@example.com")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+
+	writeFile(t, repo, "README.md", "# example\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Initial commit")
+
+	workflow := `on: push
+permissions: read-all
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: github/codeql-action/analyze@v3
+`
+	writeFile(t, repo, testWorkflowPath, workflow)
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Add workflow")
+
+	writeFile(t, repo, testWorkflowPath, "name: CI\n"+workflow)
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Move workflow lines")
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"log", testJSONLFlag, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
+		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "Add workflow") {
+		t.Fatalf("workflow addition missing:\n%s", output)
+	}
+	if strings.Contains(output, "Move workflow lines") {
+		t.Fatalf("line move produced a record:\n%s", output)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected detection errors:\n%s", stderr.String())
+	}
+}
+
 func TestLogDetectsDependencyUpdateConfigChanges(t *testing.T) {
 	repo := t.TempDir()
 	gitRun(t, repo, "init", "-b", "main")
