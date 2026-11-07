@@ -221,6 +221,10 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err err
 	if err != nil {
 		return err
 	}
+	refEvents, err := repositoryEvents(repo.Repository(), opts.Ref)
+	if err != nil {
+		return err
+	}
 	snapshots, err := newSnapshotCollector(repo, local, opts, cache, stats)
 	if err != nil {
 		return err
@@ -282,7 +286,8 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err err
 			changes = diffSignals(parent.signals, current.signals)
 			errorChanges = diffErrors(parent.errors, current.errors)
 		}
-		events := commitEvents(commit.Object)
+		events := append(commitEvents(commit.Object), refEvents[commit.Object.Hash]...)
+		sortEventSignals(events)
 		if err := writeCommitRecords(stdout, stderr, commit.Object, changes, errorChanges, events, opts.JSONL); err != nil {
 			return err
 		}
