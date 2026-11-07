@@ -878,6 +878,37 @@ func TestLogRebuildsLanguagesAtShallowBoundary(t *testing.T) {
 	}
 }
 
+func TestLogRebuildsBriefLanguagesForManifestChanges(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.name", "Signals Test")
+	gitRun(t, repo, "config", "user.email", "signals@example.com")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+
+	writeFile(t, repo, "package.json", "{\"devDependencies\":{}}\n")
+	gitRun(t, repo, "add", "package.json")
+	gitRun(t, repo, "commit", "-m", "Add package manifest")
+	writeFile(t, repo, "package.json", "{\"devDependencies\":{\"typescript\":\"5.0.0\"}}\n")
+	gitRun(t, repo, "add", "package.json")
+	gitRun(t, repo, "commit", "-m", "Add TypeScript")
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"log", testStatsFlag, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
+		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
+	}
+
+	var briefStats string
+	for _, line := range strings.Split(stderr.String(), "\n") {
+		if strings.HasPrefix(line, "signals: Brief") {
+			briefStats = line
+			break
+		}
+	}
+	if !strings.Contains(briefStats, "runs=2 full=2 partial=0") {
+		t.Fatalf("Brief stats = %q, want two full scans\nstderr:\n%s", briefStats, stderr.String())
+	}
+}
+
 func TestLogWritesJSONL(t *testing.T) {
 	repo := t.TempDir()
 	gitRun(t, repo, "init", "-b", "main")

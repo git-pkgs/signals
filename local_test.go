@@ -85,6 +85,11 @@ func TestBriefLanguagesMayChangeOnlyForLanguageTransitions(t *testing.T) {
 			want:    false,
 		},
 		{
+			name:   "dependency lockfile modified",
+			change: githistory.Change{Path: "yarn.lock", OldOID: "1", NewOID: "2"},
+			want:   true,
+		},
+		{
 			name: "Ruby file replaced by symlink",
 			change: githistory.Change{
 				Path: testRubyPath, OldOID: "1", NewOID: "2",

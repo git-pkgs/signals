@@ -434,6 +434,9 @@ func (d *localDetectors) briefLanguagesMayChange(
 		return false
 	}
 	filtered := briefdetect.FilterByChangedFiles(d.briefImpact, d.knowledge, paths)
+	if len(filtered.Manifests) > 0 {
+		return true
+	}
 	if len(filtered.Languages) == 0 {
 		return false
 	}
@@ -490,6 +493,9 @@ func encodedLanguageFileMode(encoded string) (bool, bool) {
 
 func newBriefImpactReport(knowledge *kb.KnowledgeBase) *gitbrief.Report {
 	report := &gitbrief.Report{Tools: make(map[string][]gitbrief.Detection)}
+	for _, manifest := range knowledge.ManifestFiles {
+		report.Manifests = append(report.Manifests, gitbrief.ManifestInfo{Path: manifest})
+	}
 	for _, tool := range knowledge.Tools {
 		detection := gitbrief.Detection{Name: tool.Tool.Name, Category: tool.Tool.Category}
 		if tool.Tool.Category == "language" {
