@@ -40,8 +40,8 @@ jobs:
 		{Check: checkCacheMode, Kind: workflowObservationTopLevel, Value: testPermissionRead, Path: testWorkflowPath, Line: 3},
 		{Check: checkCacheMode, Kind: workflowObservationJobLevel, Name: "Build packages", Value: "write-only", Path: testWorkflowPath, Line: 11},
 		{Check: checkJobTimeout, Kind: workflowObservationJobLevel, Name: "Build packages", Value: "30", Path: testWorkflowPath, Line: 12},
-		{Check: checkPackaging, Kind: packagingKindPackage, Name: "Python", Value: "python -m build", Path: testWorkflowPath, Line: 15},
-		{Check: checkPackaging, Kind: packagingKindPublish, Name: packagingNamePyPI, Value: "python -m twine upload dist/*", Path: testWorkflowPath, Line: 16},
+		{Check: checkPackaging, Kind: packagingKindPackage, Name: "Python", Path: testWorkflowPath, Line: 15},
+		{Check: checkPackaging, Kind: packagingKindPublish, Name: packagingNamePyPI, Path: testWorkflowPath, Line: 16},
 		{Check: checkPackaging, Kind: packagingKindPublish, Name: packagingNameContainer, Value: "docker/build-push-action", Path: testWorkflowPath, Line: 18},
 		{Check: checkTokenPermissions, Kind: permissionKindReusableTop, Name: "contents", Value: testPermissionRead, Path: testWorkflowPath, Line: 5},
 		{Check: checkTokenPermissions, Kind: permissionKindReusableJob, Name: "packages (Build packages)", Value: testPermissionWrite, Path: testWorkflowPath, Line: 10},
@@ -64,7 +64,7 @@ jobs:
         timeout: [15]
     runs-on: ubuntu-latest
     steps:
-      - run: npm pack && npm publish
+      - run: npm pack && npm publish --//registry.npmjs.org/:_authToken=committed-secret
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -72,11 +72,16 @@ jobs:
 
 	for _, wanted := range []Signal{
 		{Check: checkJobTimeout, Kind: workflowObservationJobLevel, Name: buildName, Value: "expression:matrix.timeout", Path: testWorkflowPath, Line: 4},
-		{Check: checkPackaging, Kind: packagingKindPackage, Name: packagingNameNPM, Value: "npm pack", Path: testWorkflowPath, Line: 10},
-		{Check: checkPackaging, Kind: packagingKindPublish, Name: packagingNameNPM, Value: "npm publish", Path: testWorkflowPath, Line: 10},
+		{Check: checkPackaging, Kind: packagingKindPackage, Name: packagingNameNPM, Path: testWorkflowPath, Line: 10},
+		{Check: checkPackaging, Kind: packagingKindPublish, Name: packagingNameNPM, Path: testWorkflowPath, Line: 10},
 	} {
 		if !hasWorkflowSignal(signals, wanted) {
 			t.Errorf("signal missing: %#v\ngot: %#v", wanted, signals)
+		}
+	}
+	for _, signal := range signals {
+		if strings.Contains(signal.Value, "committed-secret") {
+			t.Fatalf("packaging signal copied command arguments: %#v", signal)
 		}
 	}
 }
@@ -177,13 +182,13 @@ jobs:
 	for _, expected := range []string{
 		"+ Cache-Mode/topLevel at .github/workflows/ci.yml:2 = read",
 		"+ Job-Timeout/jobLevel release at .github/workflows/ci.yml:6 = 30",
-		"+ Packaging/package npm at .github/workflows/ci.yml:9 = npm pack",
+		"+ Packaging/package npm at .github/workflows/ci.yml:9",
 		"+ Runner-Selection/self-hosted release at .github/workflows/ci.yml = linux,self-hosted,x64",
 		"+ Token-Permissions/reusableTopLevel at .github/workflows/ci.yml:3 = none",
 		"+ Cache-Mode/topLevel at .github/workflows/ci.yml:2 = write-only",
 		"- Cache-Mode/topLevel at .github/workflows/ci.yml:2 = read",
-		"+ Packaging/publish npm at .github/workflows/ci.yml:9 = npm publish",
-		"- Packaging/package npm at .github/workflows/ci.yml:9 = npm pack",
+		"+ Packaging/publish npm at .github/workflows/ci.yml:9",
+		"- Packaging/package npm at .github/workflows/ci.yml:9",
 		"- Runner-Selection/self-hosted release at .github/workflows/ci.yml = linux,self-hosted,x64",
 	} {
 		if !strings.Contains(stdout.String(), expected) {

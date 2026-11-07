@@ -259,7 +259,6 @@ func packagingCommandSignals(filePath string, run *actionlint.String) []Signal {
 				Check: checkPackaging,
 				Kind:  kind,
 				Name:  name,
-				Value: strings.TrimSpace(segment),
 				Path:  filePath,
 				Line:  baseLine + uint(index),
 			})
