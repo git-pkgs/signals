@@ -141,6 +141,7 @@ func repositoryFileSignalsForChanges(
 	changes []githistory.Change,
 	cache map[repositoryFileCacheKey][]Signal,
 	rules *repositoryPathRules,
+	shell *shellAnalyzer,
 ) ([]Signal, []string, error) {
 	var signals []Signal
 	paths := make([]string, 0, len(changes))
@@ -165,7 +166,7 @@ func repositoryFileSignalsForChanges(
 			continue
 		}
 
-		parsed, err := repositoryFileSignalsFromFS(ctx, tree, filePath, info.Size(), rules)
+		parsed, err := repositoryFileSignalsFromFS(ctx, tree, filePath, info.Size(), rules, shell)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
@@ -185,6 +186,7 @@ func allRepositoryFileSignals(
 	ctx context.Context,
 	tree fs.FS,
 	rules *repositoryPathRules,
+	shell *shellAnalyzer,
 ) ([]Signal, error) {
 	var signals []Signal
 	err := fs.WalkDir(tree, ".", func(filePath string, entry fs.DirEntry, walkErr error) error {
@@ -198,7 +200,7 @@ func allRepositoryFileSignals(
 		if err != nil {
 			return err
 		}
-		parsed, err := repositoryFileSignalsFromFS(ctx, tree, filePath, info.Size(), rules)
+		parsed, err := repositoryFileSignalsFromFS(ctx, tree, filePath, info.Size(), rules, shell)
 		if err != nil {
 			return fmt.Errorf("read repository file %s: %w", filePath, err)
 		}
@@ -218,6 +220,7 @@ func repositoryFileSignalsFromFS(
 	filePath string,
 	size int64,
 	rules *repositoryPathRules,
+	shell *shellAnalyzer,
 ) ([]Signal, error) {
 	prefix, err := readRepositoryFile(tree, filePath, repositoryFilePrefixBytes)
 	if err != nil {
@@ -298,7 +301,67 @@ func repositoryFileSignalsFromFS(
 			signals = append(signals, rules.sastConfigSignals(filePath, nil)...)
 		}
 	}
+
+	parsed, err = shellRepositoryFileSignals(tree, filePath, prefix, shell)
+	if err != nil {
+		return nil, err
+	}
+	signals = append(signals, parsed...)
 	return signals, nil
+}
+
+func shellRepositoryFileSignals(
+	tree fs.FS,
+	filePath string,
+	prefix []byte,
+	shell *shellAnalyzer,
+) ([]Signal, error) {
+	if shell == nil {
+		return nil, nil
+	}
+	labels, err := roles.Match(filePath)
+	if err == nil && labels.BundledOrDerived() {
+		return nil, nil
+	}
+	if !dockerfilePath(filePath) && !shellScriptPath(filePath) && !shellScriptContent(prefix) {
+		return nil, nil
+	}
+	data, err := readRepositoryFile(tree, filePath, repositoryFileContentBytes)
+	if err != nil {
+		return nil, err
+	}
+	if dockerfilePath(filePath) {
+		return shell.dockerfileSignals(filePath, data), nil
+	}
+	return shell.scriptSignals(filePath, data, 0), nil
+}
+
+func dockerfilePath(filePath string) bool {
+	name := strings.ToLower(path.Base(filePath))
+	return name == "dockerfile" || strings.HasPrefix(name, "dockerfile.") || path.Ext(name) == ".dockerfile"
+}
+
+func shellScriptPath(filePath string) bool {
+	switch strings.ToLower(path.Ext(filePath)) {
+	case ".bash", ".bats", ".dash", ".ksh", ".sh", ".zsh":
+		return true
+	default:
+		return false
+	}
+}
+
+func shellScriptContent(data []byte) bool {
+	line, _, _ := bytes.Cut(data, []byte{'\n'})
+	if !bytes.HasPrefix(line, []byte("#!")) {
+		return false
+	}
+	interpreter := strings.ToLower(string(line))
+	for name := range shellLanguageName {
+		if strings.Contains(interpreter, "/"+name) || strings.Contains(interpreter, " "+name) {
+			return true
+		}
+	}
+	return false
 }
 
 func repositoryStructuredSignals(
@@ -1123,7 +1186,7 @@ func (d *localDetectors) runRepositoryFiles(
 	var paths []string
 	var err error
 	if forceFull {
-		signals, err = allRepositoryFileSignals(ctx, tree, d.repositoryPaths)
+		signals, err = allRepositoryFileSignals(ctx, tree, d.repositoryPaths, d.shell)
 	} else {
 		signals, paths, err = repositoryFileSignalsForChanges(
 			ctx,
@@ -1131,6 +1194,7 @@ func (d *localDetectors) runRepositoryFiles(
 			changes,
 			d.repositoryFileCache,
 			d.repositoryPaths,
+			d.shell,
 		)
 	}
 	detectorStats.duration += time.Since(started)
@@ -1142,7 +1206,7 @@ func (d *localDetectors) runRepositoryFiles(
 	delete(current.errors, detectorRepositoryFiles)
 	checks := []string{
 		checkBinaryArtifacts, checkCertificate, checkFuzzing, checkLicense, checkSARIF, checkSAST, checkSBOM,
-		checkSecurityChangelog, checkSecurityDocumentation, checkSecurityPolicy,
+		checkSecurityChangelog, checkSecurityDocumentation, checkSecurityPolicy, checkShellDependency,
 	}
 	if forceFull {
 		for _, check := range checks {
@@ -1151,25 +1215,27 @@ func (d *localDetectors) runRepositoryFiles(
 				removeRepositoryLicenseSignals(current.signals, nil)
 			case checkSAST:
 				removeRepositorySASTSignals(current.signals)
+			case checkShellDependency:
+				removeRepositoryShellSignals(current.signals)
 			default:
 				removeCheckSignals(current.signals, check)
 			}
 		}
 	} else {
 		pathSet := make(map[string]bool, len(paths))
-		sastPathSet := make(map[string]bool, len(paths))
+		repositoryPathSet := make(map[string]bool, len(paths))
 		for _, filePath := range paths {
 			pathSet[filePath] = true
 			if !isWorkflowPath(filePath) {
-				sastPathSet[filePath] = true
+				repositoryPathSet[filePath] = true
 			}
 		}
 		for _, check := range checks {
 			switch check {
 			case checkLicense:
 				removeRepositoryLicenseSignals(current.signals, pathSet)
-			case checkSAST:
-				removePathSignals(current.signals, check, sastPathSet)
+			case checkSAST, checkShellDependency:
+				removePathSignals(current.signals, check, repositoryPathSet)
 			default:
 				removePathSignals(current.signals, check, pathSet)
 			}
@@ -1191,6 +1257,14 @@ func removeRepositoryLicenseSignals(signals map[string]Signal, paths map[string]
 func removeRepositorySASTSignals(signals map[string]Signal) {
 	for key, signal := range signals {
 		if signal.Check == checkSAST && !isWorkflowPath(signal.Path) {
+			delete(signals, key)
+		}
+	}
+}
+
+func removeRepositoryShellSignals(signals map[string]Signal) {
+	for key, signal := range signals {
+		if signal.Check == checkShellDependency && !isWorkflowPath(signal.Path) {
 			delete(signals, key)
 		}
 	}

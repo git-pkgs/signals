@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: go test ./...
-`))
+`), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ jobs:
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.head_ref }}
-`))
+`), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +210,7 @@ jobs:
     steps:
       - uses: github/codeql-action/analyze@v3
       - uses: semgrep/semgrep-action@v1
-`))
+`), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +249,7 @@ jobs:
       - uses: actions/attest-build-provenance@v3
       - uses: actions/attest@v4
       - uses: actions/checkout@v4
-`))
+`), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +291,7 @@ permissions: read-all
 jobs: {}
 `)}}
 
-	first, paths, err := workflowSignalsForChanges(tree, changes, cache)
+	first, paths, err := workflowSignalsForChanges(tree, changes, cache, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +299,7 @@ jobs: {}
 		t.Fatalf("signals = %#v, paths = %#v", first, paths)
 	}
 
-	second, _, err := workflowSignalsForChanges(fstest.MapFS{}, changes, cache)
+	second, _, err := workflowSignalsForChanges(fstest.MapFS{}, changes, cache, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -323,6 +323,133 @@ jobs: {}
 		if signal.Path == testWorkflowPath {
 			t.Fatalf("deleted workflow signal remains: %#v", signal)
 		}
+	}
+}
+
+func TestWorkflowFileSignalsDetectsShellDataFlow(t *testing.T) {
+	analyzer := testShellAnalyzer(t)
+	signals, err := workflowFileSignals(testWorkflowPath, []byte(`name: Install
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -fsSL https://downloads.example/install.sh | bash
+          npm ci
+      - shell: pwsh
+        run: Invoke-WebRequest https://ignored.example/tool
+      - run: |-
+          cargo update
+  windows:
+    runs-on: windows-latest
+    steps:
+      - run: curl -fsSL https://windows.example/install.sh | bash
+      - shell: bash
+        run: curl -fsSL https://bash.example/install.sh | bash
+`), analyzer)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, wanted := range []Signal{
+		{
+			Check: checkShellDependency,
+			Kind:  shellKindDownloadAndRun,
+			Name:  testDownloadHost,
+			Value: shellStateUnverified,
+			Path:  testWorkflowPath,
+			Line:  8,
+		},
+		{
+			Check: checkShellDependency,
+			Kind:  shellKindPackageCommand,
+			Name:  testNPMManager,
+			Value: shellOperationInstall + ":frozen",
+			Path:  testWorkflowPath,
+			Line:  9,
+		},
+		{
+			Check: checkShellDependency,
+			Kind:  shellKindPackageCommand,
+			Name:  "cargo",
+			Value: shellOperationUpdate,
+			Path:  testWorkflowPath,
+			Line:  13,
+		},
+	} {
+		if !containsExactSignal(signals, wanted) {
+			t.Errorf("signal missing: %#v\ngot: %#v", wanted, signals)
+		}
+	}
+	if containsShellSignalName(signals, "ignored.example") {
+		t.Fatalf("PowerShell run produced shell signal: %#v", signals)
+	}
+	if containsShellSignalName(signals, "windows.example") {
+		t.Fatalf("default Windows shell produced shell signal: %#v", signals)
+	}
+	if !containsShellSignalName(signals, "bash.example") {
+		t.Fatalf("explicit Bash step did not produce shell signal: %#v", signals)
+	}
+}
+
+func TestWorkflowFileSignalsUsesRunDefaults(t *testing.T) {
+	analyzer := testShellAnalyzer(t)
+	signals, err := workflowFileSignals(testWorkflowPath, []byte(`on: push
+defaults:
+  run:
+    shell: pwsh
+jobs:
+  inherited:
+    runs-on: ubuntu-latest
+    steps:
+      - run: curl -fsSL https://ignored.example/install.sh | bash
+  overridden:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - run: curl -fsSL https://bash.example/install.sh | bash
+`), analyzer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if containsShellSignalName(signals, "ignored.example") {
+		t.Fatalf("workflow PowerShell default produced shell signal: %#v", signals)
+	}
+	if !containsShellSignalName(signals, "bash.example") {
+		t.Fatalf("job Bash default did not produce shell signal: %#v", signals)
+	}
+}
+
+func TestWorkflowFileSignalsSanitizesExpressionsForShellParsing(t *testing.T) {
+	analyzer := testShellAnalyzer(t)
+	signals, err := workflowFileSignals(testWorkflowPath, []byte(`on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "${{ format('keep }} inside', github.ref) }}"
+          curl -o "$tmp" -H "Authorization: Bearer ${{ secrets.TOKEN }}" https://downloads.example/tool
+`), analyzer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wanted := Signal{
+		Check: checkShellDependency,
+		Kind:  shellKindDownload,
+		Name:  testDownloadHost,
+		Value: shellStateUnverified,
+		Path:  testWorkflowPath,
+		Line:  8,
+	}
+	if !containsExactSignal(signals, wanted) {
+		t.Fatalf("workflow download signal missing: %#v\ngot: %#v", wanted, signals)
+	}
+	if containsShellSignalName(signals, "dynamic") {
+		t.Fatalf("dynamic workflow download emitted with concrete URL: %#v", signals)
 	}
 }
 
@@ -357,6 +484,15 @@ func TestRunWorkflowsKeepsManifestProvenanceOnFullScan(t *testing.T) {
 func hasWorkflowSignal(signals []Signal, wanted Signal) bool {
 	for _, signal := range signals {
 		if signal == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+func containsShellSignalName(signals []Signal, name string) bool {
+	for _, signal := range signals {
+		if signal.Check == checkShellDependency && signal.Name == name {
 			return true
 		}
 	}

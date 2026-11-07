@@ -19,7 +19,8 @@ const (
 )
 
 type packageManagerDetector struct {
-	detector *pkgmanagers.Detector
+	detector    *pkgmanagers.Detector
+	definitions []*definitions.Definition
 }
 
 func newPackageManagerDetector() (*packageManagerDetector, error) {
@@ -32,7 +33,7 @@ func newPackageManagerDetector() (*packageManagerDetector, error) {
 	for _, def := range defs {
 		detector.Register(def)
 	}
-	return &packageManagerDetector{detector: detector}, nil
+	return &packageManagerDetector{detector: detector, definitions: defs}, nil
 }
 
 func (d *packageManagerDetector) directoriesForChanges(changes []githistory.Change) ([]string, error) {

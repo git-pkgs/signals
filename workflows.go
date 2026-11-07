@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -59,6 +60,7 @@ func workflowSignalsForChanges(
 	tree fs.FS,
 	changes []githistory.Change,
 	cache map[workflowCacheKey][]Signal,
+	shell *shellAnalyzer,
 ) ([]Signal, []string, error) {
 	var signals []Signal
 	var paths []string
@@ -84,7 +86,7 @@ func workflowSignalsForChanges(
 		if err != nil {
 			return nil, nil, fmt.Errorf("read workflow %s: %w", path, err)
 		}
-		parsed, err := workflowFileSignals(path, data)
+		parsed, err := workflowFileSignals(path, data, shell)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -97,7 +99,7 @@ func workflowSignalsForChanges(
 	return deduplicateSignals(signals), paths, nil
 }
 
-func allWorkflowSignals(tree fs.FS) ([]Signal, error) {
+func allWorkflowSignals(tree fs.FS, shell *shellAnalyzer) ([]Signal, error) {
 	var signals []Signal
 	err := fs.WalkDir(tree, ".github/workflows", func(path string, entry fs.DirEntry, walkErr error) error {
 		if errors.Is(walkErr, fs.ErrNotExist) {
@@ -113,7 +115,7 @@ func allWorkflowSignals(tree fs.FS) ([]Signal, error) {
 		if err != nil {
 			return fmt.Errorf("read workflow %s: %w", path, err)
 		}
-		parsed, err := workflowFileSignals(path, data)
+		parsed, err := workflowFileSignals(path, data, shell)
 		if err != nil {
 			return err
 		}
@@ -127,7 +129,7 @@ func allWorkflowSignals(tree fs.FS) ([]Signal, error) {
 	return deduplicateSignals(signals), nil
 }
 
-func workflowFileSignals(path string, data []byte) ([]Signal, error) {
+func workflowFileSignals(path string, data []byte, analyzers ...*shellAnalyzer) ([]Signal, error) {
 	workflow, parseErrors := actionlint.Parse(data)
 	if workflow == nil {
 		if len(parseErrors) == 0 {
@@ -140,6 +142,11 @@ func workflowFileSignals(path string, data []byte) ([]Signal, error) {
 	signals = append(signals, sastWorkflowSignals(path, workflow)...)
 	signals = append(signals, workflowObservationSignals(path, data, workflow)...)
 	signals = append(signals, artifactProvenanceSignals(path, workflow)...)
+	var shell *shellAnalyzer
+	if len(analyzers) > 0 {
+		shell = analyzers[0]
+	}
+	signals = append(signals, shellWorkflowSignals(path, data, workflow, shell)...)
 	sortSignals(signals)
 	return deduplicateSignals(signals), nil
 }
@@ -192,6 +199,153 @@ func artifactProvenanceAction(uses string) (kind, name string) {
 	default:
 		return "", ""
 	}
+}
+
+func shellWorkflowSignals(
+	path string,
+	data []byte,
+	workflow *actionlint.Workflow,
+	shell *shellAnalyzer,
+) []Signal {
+	if shell == nil {
+		return nil
+	}
+	var signals []Signal
+	for _, id := range sortedWorkflowJobIDs(workflow) {
+		job := workflow.Jobs[id]
+		if job == nil {
+			continue
+		}
+		walkWorkflowSteps(job.Steps, func(step *actionlint.Step) {
+			execution, ok := step.Exec.(*actionlint.ExecRun)
+			if !ok || execution == nil || execution.Run == nil ||
+				!workflowRunUsesShell(execution.Shell, job, workflow) {
+				return
+			}
+			line := workflowRunLineOffset(data, execution)
+			script := sanitizeWorkflowExpressions(execution.Run.Value)
+			signals = append(signals, shell.scriptSignals(path, []byte(script), line)...)
+		})
+	}
+	return signals
+}
+
+func sanitizeWorkflowExpressions(script string) string {
+	data := []byte(script)
+	for search := 0; search < len(data); {
+		relative := bytes.Index(data[search:], []byte("${{"))
+		if relative < 0 {
+			break
+		}
+		start := search + relative
+		end := workflowExpressionEnd(data, start+3)
+		if end < 0 {
+			break
+		}
+		for index := start; index < end; index++ {
+			if data[index] != '\n' && data[index] != '\r' {
+				data[index] = '_'
+			}
+		}
+		search = end
+	}
+	return string(data)
+}
+
+func workflowExpressionEnd(data []byte, start int) int {
+	var quote byte
+	escaped := false
+	for index := start; index < len(data); index++ {
+		current := data[index]
+		if quote != 0 {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if current == '\\' {
+				escaped = true
+				continue
+			}
+			if current == quote {
+				quote = 0
+			}
+			continue
+		}
+		if current == '\'' || current == '"' {
+			quote = current
+			continue
+		}
+		if current == '}' && index+1 < len(data) && data[index+1] == '}' {
+			return index + 2
+		}
+	}
+	return -1
+}
+
+func workflowRunLineOffset(data []byte, execution *actionlint.ExecRun) uint {
+	line := posLine(execution.RunPos)
+	if line == 0 {
+		line = posLine(execution.Run.Pos)
+	}
+	if line > 0 && !workflowBlockScalar(data, line) {
+		line--
+	}
+	return line
+}
+
+func workflowBlockScalar(data []byte, line uint) bool {
+	lines := bytes.Split(data, []byte{'\n'})
+	if line == 0 || int(line) > len(lines) {
+		return false
+	}
+	text := strings.TrimSpace(string(lines[line-1]))
+	_, value, ok := strings.Cut(text, ":")
+	if !ok {
+		return false
+	}
+	value = strings.TrimSpace(value)
+	return strings.HasPrefix(value, "|") || strings.HasPrefix(value, ">")
+}
+
+func workflowRunUsesShell(shell *actionlint.String, job *actionlint.Job, workflow *actionlint.Workflow) bool {
+	if shell == nil || strings.TrimSpace(shell.Value) == "" {
+		shell = workflowDefaultShell(job, workflow)
+	}
+	if shell == nil || strings.TrimSpace(shell.Value) == "" {
+		return !workflowJobUsesWindows(job)
+	}
+	name := strings.ToLower(strings.Fields(shell.Value)[0])
+	name = fsPathBase(name)
+	return shellLanguageName[name]
+}
+
+func workflowDefaultShell(job *actionlint.Job, workflow *actionlint.Workflow) *actionlint.String {
+	if job != nil && job.Defaults != nil && job.Defaults.Run != nil && job.Defaults.Run.Shell != nil {
+		return job.Defaults.Run.Shell
+	}
+	if workflow != nil && workflow.Defaults != nil && workflow.Defaults.Run != nil {
+		return workflow.Defaults.Run.Shell
+	}
+	return nil
+}
+
+func workflowJobUsesWindows(job *actionlint.Job) bool {
+	if job == nil || job.RunsOn == nil {
+		return false
+	}
+	for _, label := range job.RunsOn.Labels {
+		if label != nil && strings.Contains(strings.ToLower(label.Value), "windows") {
+			return true
+		}
+	}
+	return false
+}
+
+func fsPathBase(value string) string {
+	if slash := strings.LastIndexAny(value, "/\\"); slash >= 0 {
+		return value[slash+1:]
+	}
+	return value
 }
 
 func dangerousWorkflowSignals(path string, workflow *actionlint.Workflow) []Signal {
@@ -524,9 +678,9 @@ func (d *localDetectors) runWorkflows(
 	var paths []string
 	var err error
 	if forceFull {
-		signals, err = allWorkflowSignals(tree)
+		signals, err = allWorkflowSignals(tree, d.shell)
 	} else {
-		signals, paths, err = workflowSignalsForChanges(tree, changes, d.workflowCache)
+		signals, paths, err = workflowSignalsForChanges(tree, changes, d.workflowCache, d.shell)
 	}
 	detectorStats.duration += time.Since(started)
 	if err != nil {
@@ -545,6 +699,7 @@ func (d *localDetectors) runWorkflows(
 		removeWorkflowCheckSignals(current.signals, checkPackageProvenance)
 		removeCheckSignals(current.signals, checkRunnerSelection)
 		removeWorkflowCheckSignals(current.signals, checkSAST)
+		removeWorkflowCheckSignals(current.signals, checkShellDependency)
 	} else {
 		pathSet := make(map[string]bool, len(paths))
 		for _, path := range paths {
@@ -559,6 +714,7 @@ func (d *localDetectors) runWorkflows(
 		removePathSignals(current.signals, checkPackageProvenance, pathSet)
 		removePathSignals(current.signals, checkRunnerSelection, pathSet)
 		removePathSignals(current.signals, checkSAST, pathSet)
+		removePathSignals(current.signals, checkShellDependency, pathSet)
 	}
 	addSignals(current.signals, signals)
 }

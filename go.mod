@@ -28,6 +28,7 @@ require (
 	github.com/tidwall/jsonc v0.3.3
 	github.com/titanous/json5 v1.0.0
 	go.yaml.in/yaml/v3 v3.0.6
+	mvdan.cc/sh/v3 v3.14.1
 )
 
 require (
