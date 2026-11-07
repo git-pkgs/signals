@@ -79,6 +79,24 @@ func TestRepositoryFileSignalsUsesGitPkgsParsers(t *testing.T) {
 	}) {
 		t.Fatalf("notice signals = %#v", noticeSignals)
 	}
+	for _, signal := range noticeSignals {
+		if signal.Kind == signalKindLicense {
+			t.Fatalf("plain notice signals = %#v", noticeSignals)
+		}
+	}
+	licensedNoticeSignals := repositorySignals(
+		t,
+		"docs/NOTICE",
+		[]byte("Project notice\n\n"+mitLicenseText),
+	)
+	if !containsExactSignal(licensedNoticeSignals, Signal{
+		Check: checkLicense,
+		Kind:  signalKindLicense,
+		Name:  testMITLicenseID,
+		Path:  "docs/NOTICE",
+	}) {
+		t.Fatalf("licensed notice signals = %#v", licensedNoticeSignals)
+	}
 
 	sbomSignals := repositorySignals(t, "artifacts/inventory.json", []byte(`{
   "bomFormat": "CycloneDX",
@@ -216,7 +234,7 @@ func TestRepositoryFileSignalsForChangesUsesBlobCache(t *testing.T) {
 	changes := []githistory.Change{{Path: testLicensePath, NewOID: "1234"}}
 	tree := fstest.MapFS{testLicensePath: {Data: []byte(mitLicenseText)}}
 
-	first, paths, err := repositoryFileSignalsForChanges(tree, changes, cache)
+	first, paths, err := repositoryFileSignalsForChanges(t.Context(), tree, changes, cache)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +242,7 @@ func TestRepositoryFileSignalsForChangesUsesBlobCache(t *testing.T) {
 		t.Fatalf("signals = %#v, paths = %#v", first, paths)
 	}
 
-	second, _, err := repositoryFileSignalsForChanges(fstest.MapFS{}, changes, cache)
+	second, _, err := repositoryFileSignalsForChanges(t.Context(), fstest.MapFS{}, changes, cache)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,6 +256,7 @@ func TestRepositoryFileSignalsForChangesSkipsDirectories(t *testing.T) {
 	tree := fstest.MapFS{testLicensePath: {Mode: fs.ModeDir}}
 
 	signals, paths, err := repositoryFileSignalsForChanges(
+		t.Context(),
 		tree,
 		changes,
 		make(map[repositoryFileCacheKey][]Signal),
@@ -338,7 +357,11 @@ func TestLogDetectsRepositoryFileSignals(t *testing.T) {
 
 func repositorySignals(t *testing.T, filePath string, data []byte) []Signal {
 	t.Helper()
-	signals, err := repositoryFileSignalsFromFS(fstest.MapFS{filePath: {Data: data}}, filePath)
+	signals, err := repositoryFileSignalsFromFS(
+		t.Context(),
+		fstest.MapFS{filePath: {Data: data}},
+		filePath,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
