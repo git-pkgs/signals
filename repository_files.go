@@ -10,6 +10,7 @@ import (
 	"path"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	githistory "github.com/git-pkgs/history"
@@ -93,6 +94,16 @@ func repositoryFileSignalsForChanges(
 				continue
 			}
 		}
+		info, err := fs.Stat(tree, filePath)
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+			continue
+		}
+		if err != nil {
+			return nil, nil, fmt.Errorf("stat repository file %s: %w", filePath, err)
+		}
+		if info.IsDir() {
+			continue
+		}
 
 		parsed, err := repositoryFileSignalsFromFS(tree, filePath)
 		if errors.Is(err, fs.ErrNotExist) {
@@ -157,7 +168,11 @@ func repositoryFileNeedsFullContent(filePath string) bool {
 		licenseFile(filePath) || sbomContentPath(filePath) || sastConfigPath(filePath) {
 		return true
 	}
-	return len(fuzzPatterns[strings.ToLower(path.Ext(filePath))]) > 0
+	if len(fuzzPatterns[strings.ToLower(path.Ext(filePath))]) == 0 {
+		return false
+	}
+	labels, err := roles.Match(filePath)
+	return err != nil || !labels.BundledOrDerived()
 }
 
 func sbomContentPath(filePath string) bool {
@@ -369,7 +384,7 @@ func securityPolicySignals(filePath string, data []byte) []Signal {
 	for scanner.Scan() {
 		line++
 		text := scanner.Text()
-		for _, value := range securityPolicyURLPattern.FindAllString(text, -1) {
+		for _, value := range securityPolicyURLs(text) {
 			signals = append(signals, Signal{
 				Check: checkSecurityPolicy,
 				Kind:  "link",
@@ -389,6 +404,26 @@ func securityPolicySignals(filePath string, data []byte) []Signal {
 		}
 	}
 	return signals
+}
+
+func securityPolicyURLs(text string) []string {
+	matches := securityPolicyURLPattern.FindAllStringIndex(text, -1)
+	urls := make([]string, 0, len(matches))
+	for _, match := range matches {
+		value := text[match[0]:match[1]]
+		if !explicitMarkdownURL(text, match[0], match[1]) {
+			value = strings.TrimRight(value, ".")
+		}
+		urls = append(urls, value)
+	}
+	return urls
+}
+
+func explicitMarkdownURL(text string, start, end int) bool {
+	markdownDestination := start >= 2 && text[start-1] == '(' && text[start-2] == ']' &&
+		end < len(text) && text[end] == ')'
+	autolink := start > 0 && text[start-1] == '<' && end < len(text) && text[end] == '>'
+	return markdownDestination || autolink
 }
 
 func fuzzingSignals(filePath string, data []byte) []Signal {

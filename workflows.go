@@ -37,7 +37,8 @@ func workflowsAffected(changes []githistory.Change) bool {
 }
 
 func isWorkflowPath(path string) bool {
-	if !strings.HasPrefix(path, ".github/workflows/") {
+	relative, found := strings.CutPrefix(path, ".github/workflows/")
+	if !found || strings.Contains(relative, "/") {
 		return false
 	}
 	ext := strings.ToLower(fsPathExt(path))
@@ -202,9 +203,19 @@ func untrustedCheckout(execution *actionlint.ExecAction) bool {
 	if input == nil || input.Value == nil {
 		return false
 	}
-	ref := input.Value.Value
-	return strings.Contains(ref, "github.event.pull_request") ||
-		strings.Contains(ref, "github.event.workflow_run")
+	ref := strings.ToLower(input.Value.Value)
+	if strings.Contains(ref, "github.event.pull_request") ||
+		strings.Contains(ref, "github.event.workflow_run") ||
+		strings.Contains(ref, "refs/pull/") && strings.Contains(ref, "github.event.number") {
+		return true
+	}
+	repository := execution.Inputs["repository"]
+	if repository == nil || repository.Value == nil {
+		return false
+	}
+	repositoryValue := strings.ToLower(repository.Value.Value)
+	return strings.Contains(ref, "github.head_ref") &&
+		strings.Contains(repositoryValue, "github.event.pull_request.head.repo")
 }
 
 func walkWorkflowSteps(steps []*actionlint.Step, visit func(*actionlint.Step)) {

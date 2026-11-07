@@ -1,10 +1,14 @@
 package main
 
 import (
+	"errors"
+	"io/fs"
 	"strings"
 	"testing"
 	"testing/fstest"
 )
+
+const testScalaStewardPath = ".scala-steward.conf"
 
 func TestDependabotSignalsDescribeUpdatePolicy(t *testing.T) {
 	signals := dependabotSignals(".github/dependabot.yml", []byte(`
@@ -237,23 +241,68 @@ func TestDependencyUpdateConfigSignalsParsesPackageJSONStrictly(t *testing.T) {
 
 func TestDependencyUpdateConfigSignalsDetectsUpdateTools(t *testing.T) {
 	signals, err := dependencyUpdateConfigSignals(fstest.MapFS{
-		dependabotYMLPath:     {Data: []byte("version: 2\nupdates: []\n")},
-		renovateJSONPath:      {Data: []byte(`{}`)},
-		".scala-steward.conf": {Data: []byte("updates.pin = true\n")},
+		dependabotYMLPath:    {Data: []byte("version: 2\nupdates: []\n")},
+		renovateJSONPath:     {Data: []byte(`{}`)},
+		testScalaStewardPath: {Data: []byte("updates.pin = true\n")},
 	})
 	if err != nil {
 		t.Fatalf("dependencyUpdateConfigSignals: %v", err)
 	}
 
 	for _, wanted := range []Signal{
-		dependencyUpdateToolSignal(dependencyToolDependabot, dependabotYMLPath),
-		dependencyUpdateToolSignal(dependencyToolRenovate, renovateJSONPath),
-		dependencyUpdateToolSignal("Scala Steward", ".scala-steward.conf"),
+		{Check: checkDependencyUpdateTool, Kind: signalKindTool, Name: dependencyToolDependabot, Path: dependabotYMLPath, Line: 1},
+		{Check: checkDependencyUpdateTool, Kind: signalKindTool, Name: dependencyToolRenovate, Path: renovateJSONPath, Line: 1},
+		{Check: checkDependencyUpdateTool, Kind: signalKindTool, Name: "Scala Steward", Path: testScalaStewardPath, Line: 1},
 	} {
 		if !containsExactSignal(signals, wanted) {
 			t.Errorf("signal missing: %#v\ngot: %#v", wanted, signals)
 		}
 	}
+}
+
+func TestDependencyUpdateConfigSignalsSkipsScalaStewardDirectories(t *testing.T) {
+	signals, err := dependencyUpdateConfigSignals(fstest.MapFS{
+		testScalaStewardPath: {Mode: fs.ModeDir},
+		"scala-steward.conf": {Data: []byte("updates.pin = true\n")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wanted := Signal{
+		Check: checkDependencyUpdateTool,
+		Kind:  signalKindTool,
+		Name:  "Scala Steward",
+		Path:  "scala-steward.conf",
+		Line:  1,
+	}
+	if !containsExactSignal(signals, wanted) {
+		t.Fatalf("signals = %#v", signals)
+	}
+}
+
+func TestDependencyUpdateConfigSignalsReportsScalaStewardLookupErrors(t *testing.T) {
+	wantErr := errors.New("storage failure")
+	_, err := dependencyUpdateConfigSignals(statErrorFS{
+		FS:   fstest.MapFS{},
+		path: testScalaStewardPath,
+		err:  wantErr,
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("error = %v, want %v", err, wantErr)
+	}
+}
+
+type statErrorFS struct {
+	fs.FS
+	path string
+	err  error
+}
+
+func (s statErrorFS) Stat(name string) (fs.FileInfo, error) {
+	if name == s.path {
+		return nil, s.err
+	}
+	return fs.Stat(s.FS, name)
 }
 
 func findSignal(t *testing.T, signals []Signal, kind, name string) Signal {

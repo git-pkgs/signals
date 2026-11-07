@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/tidwall/jsonc"
 	"github.com/titanous/json5"
@@ -138,12 +139,16 @@ func dependencyUpdateConfigSignals(tree fs.FS) ([]Signal, error) {
 		return nil, err
 	}
 	signals = append(signals, renovate...)
-	signals = append(signals, dependencyUpdateToolSignals(tree, signals)...)
+	tools, err := dependencyUpdateToolSignals(tree, signals)
+	if err != nil {
+		return nil, err
+	}
+	signals = append(signals, tools...)
 	sortSignals(signals)
 	return deduplicateSignals(signals), nil
 }
 
-func dependencyUpdateToolSignals(tree fs.FS, configSignals []Signal) []Signal {
+func dependencyUpdateToolSignals(tree fs.FS, configSignals []Signal) ([]Signal, error) {
 	seen := make(map[string]bool)
 	var signals []Signal
 	for _, signal := range configSignals {
@@ -160,12 +165,20 @@ func dependencyUpdateToolSignals(tree fs.FS, configSignals []Signal) []Signal {
 		if seen["Scala Steward"] {
 			break
 		}
-		if _, err := fs.Stat(tree, filePath); err == nil {
-			seen["Scala Steward"] = true
-			signals = append(signals, dependencyUpdateToolSignal("Scala Steward", filePath))
+		info, err := fs.Stat(tree, filePath)
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+			continue
 		}
+		if err != nil {
+			return nil, fmt.Errorf("stat Scala Steward config %s: %w", filePath, err)
+		}
+		if info.IsDir() {
+			continue
+		}
+		seen["Scala Steward"] = true
+		signals = append(signals, dependencyUpdateToolSignal("Scala Steward", filePath))
 	}
-	return signals
+	return signals, nil
 }
 
 func dependencyUpdateToolSignal(tool, filePath string) Signal {

@@ -157,8 +157,11 @@ func (d *localDetectors) detect(
 	packageRun := packageFull || packagesAffected(changes)
 	repositoryFileFull := forceFull || parent.errors[detectorRepositoryFiles] != ""
 	repositoryFileRun := repositoryFileFull || len(changes) > 0
-	workflowFull := forceFull || parent.errors[detectorWorkflows] != ""
-	workflowRun := workflowFull || workflowsAffected(changes)
+	workflowAffected := workflowsAffected(changes)
+	workflowError := parent.errors[detectorWorkflows]
+	workflowFull := forceFull || workflowError != "" &&
+		(workflowAffected || !strings.HasPrefix(workflowError, "parse workflow "))
+	workflowRun := workflowFull || workflowAffected
 	managerDirectories, managerImpactErr := d.packageManagers.directoriesForChanges(changes)
 	managerFull := forceFull || parent.errors[detectorPackageManagers] != ""
 	managerRun := managerFull || managerImpactErr != nil || len(managerDirectories) > 0

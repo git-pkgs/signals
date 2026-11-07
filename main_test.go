@@ -327,6 +327,10 @@ jobs:
 	gitRun(t, repo, "add", ".")
 	gitRun(t, repo, "commit", "-m", "Break workflow")
 
+	writeFile(t, repo, "README.md", "# Unrelated change\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Change documentation")
+
 	writeFile(t, repo, testWorkflowPath, `on: push
 permissions: read-all
 jobs:
@@ -338,7 +342,7 @@ jobs:
 	gitRun(t, repo, "commit", "-m", "Repair workflow")
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"log", testJSONLFlag, "--workers", "1", repo}, &stdout, &stderr); err != nil {
+	if err := run([]string{"log", testJSONLFlag, testStatsFlag, "--workers", "1", repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 
@@ -374,6 +378,16 @@ jobs:
 	if !strings.Contains(stderr.String(), detectorWorkflows+": parse workflow "+testWorkflowPath) ||
 		!strings.Contains(stderr.String(), detectorWorkflows+": detection recovered") {
 		t.Fatalf("workflow error output:\n%s", stderr.String())
+	}
+	var workflowStats string
+	for _, line := range strings.Split(stderr.String(), "\n") {
+		if strings.Contains(line, "signals: Workflows ") {
+			workflowStats = line
+			break
+		}
+	}
+	if !strings.Contains(workflowStats, "runs=3 full=2 partial=1 skipped=1") {
+		t.Fatalf("workflow stats = %q\nstderr:\n%s", workflowStats, stderr.String())
 	}
 }
 
@@ -848,7 +862,7 @@ func TestLogRebuildsLanguagesAtShallowBoundary(t *testing.T) {
 	writeFile(t, repo, ".git/shallow", boundary+"\n")
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"log", "--stats", "--workers", "1", repo}, &stdout, &stderr); err != nil {
+	if err := run([]string{"log", testStatsFlag, "--workers", "1", repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 
@@ -914,16 +928,17 @@ func TestLogWritesJSONL(t *testing.T) {
 		t.Fatalf("unexpected detection errors:\n%s", stderr.String())
 	}
 
-	record.Commit = strings.Repeat("0", 40)
-	got, err := json.Marshal(record)
-	if err != nil {
-		t.Fatal(err)
-	}
+	got := strings.Replace(
+		stdout.String(),
+		`"commit":"`+record.Commit+`"`,
+		`"commit":"`+strings.Repeat("0", 40)+`"`,
+		1,
+	)
 	want, err := os.ReadFile("testdata/change.jsonl")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got)+"\n" != string(want) {
+	if got != string(want) {
 		t.Errorf("JSONL output changed\ngot:  %s\nwant: %s", got, want)
 	}
 }
@@ -1125,7 +1140,7 @@ func TestRunPropagatesWriterErrors(t *testing.T) {
 		{name: "text", args: []string{"log", repo}, stdout: failingWriter{}, stderr: io.Discard},
 		{name: "JSONL", args: []string{"log", testJSONLFlag, repo}, stdout: failingWriter{}, stderr: io.Discard},
 		{name: "progress", args: []string{"log", "--progress", "1", repo}, stdout: io.Discard, stderr: failingWriter{}},
-		{name: "stats", args: []string{"log", "--stats", repo}, stdout: io.Discard, stderr: failingWriter{}},
+		{name: "stats", args: []string{"log", testStatsFlag, repo}, stdout: io.Discard, stderr: failingWriter{}},
 	}
 
 	for _, test := range tests {

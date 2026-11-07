@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"io/fs"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -14,6 +15,7 @@ const (
 	testMITLicenseID       = "MIT"
 	testJSONLFlag          = "--jsonl"
 	testSecurityPolicyPath = ".github/SECURITY.md"
+	testStatsFlag          = "--stats"
 	testWorkersFlag        = "--workers"
 )
 
@@ -90,12 +92,14 @@ func TestRepositoryFileSignalsUsesGitPkgsParsers(t *testing.T) {
 	}
 
 	policySignals := repositorySignals(t, testSecurityPolicyPath, []byte(
-		"Report issues to security@example.com.\nSee https://example.com/security.\n",
+		"Report issues to security@example.com.\nSee https://example.com/security.\n"+
+			"Read the [policy](https://example.com/security.).\n",
 	))
 	for _, wanted := range []Signal{
 		{Check: checkSecurityPolicy, Kind: "policy", Path: testSecurityPolicyPath, Line: 1},
 		{Check: checkSecurityPolicy, Kind: "email", Value: "security@example.com", Path: testSecurityPolicyPath, Line: 1},
-		{Check: checkSecurityPolicy, Kind: "link", Value: "https://example.com/security.", Path: testSecurityPolicyPath, Line: 2},
+		{Check: checkSecurityPolicy, Kind: "link", Value: "https://example.com/security", Path: testSecurityPolicyPath, Line: 2},
+		{Check: checkSecurityPolicy, Kind: "link", Value: "https://example.com/security.", Path: testSecurityPolicyPath, Line: 3},
 	} {
 		if !containsExactSignal(policySignals, wanted) {
 			t.Errorf("signal missing: %#v\ngot: %#v", wanted, policySignals)
@@ -208,6 +212,32 @@ func TestRepositoryFileSignalsForChangesUsesBlobCache(t *testing.T) {
 	}
 	if len(second) != len(first) {
 		t.Fatalf("cached signals = %#v, want %#v", second, first)
+	}
+}
+
+func TestRepositoryFileSignalsForChangesSkipsDirectories(t *testing.T) {
+	changes := []githistory.Change{{Path: testLicensePath, NewOID: "1234"}}
+	tree := fstest.MapFS{testLicensePath: {Mode: fs.ModeDir}}
+
+	signals, paths, err := repositoryFileSignalsForChanges(
+		tree,
+		changes,
+		make(map[repositoryFileCacheKey][]Signal),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(signals) != 0 || len(paths) != 1 || paths[0] != testLicensePath {
+		t.Fatalf("signals = %#v, paths = %#v", signals, paths)
+	}
+}
+
+func TestRepositoryFileNeedsFullContentSkipsVendoredFuzzSources(t *testing.T) {
+	if repositoryFileNeedsFullContent("vendor/dependency/fuzz_test.go") {
+		t.Fatal("vendored fuzz source requires full content")
+	}
+	if !repositoryFileNeedsFullContent("fuzz_test.go") {
+		t.Fatal("project fuzz source does not require full content")
 	}
 }
 
