@@ -640,14 +640,34 @@ func printStats(writer io.Writer, stats *scanStats) error {
 }
 
 func diffSignals(previous, current map[string]Signal) []signalChange {
-	changes := make([]signalChange, 0)
+	removed := make(map[signalIdentity][]Signal)
+	added := make(map[signalIdentity][]Signal)
 	for key, signal := range previous {
 		if _, ok := current[key]; !ok {
-			changes = append(changes, signalChange{Marker: '-', Signal: signal})
+			identity := newSignalIdentity(signal)
+			removed[identity] = append(removed[identity], signal)
 		}
 	}
 	for key, signal := range current {
 		if _, ok := previous[key]; !ok {
+			identity := newSignalIdentity(signal)
+			added[identity] = append(added[identity], signal)
+		}
+	}
+
+	changes := make([]signalChange, 0)
+	for identity, removedSignals := range removed {
+		unmatchedRemoved, unmatchedAdded := unmatchedLineSignals(removedSignals, added[identity])
+		for _, signal := range unmatchedRemoved {
+			changes = append(changes, signalChange{Marker: '-', Signal: signal})
+		}
+		for _, signal := range unmatchedAdded {
+			changes = append(changes, signalChange{Marker: '+', Signal: signal})
+		}
+		delete(added, identity)
+	}
+	for _, addedSignals := range added {
+		for _, signal := range addedSignals {
 			changes = append(changes, signalChange{Marker: '+', Signal: signal})
 		}
 	}
@@ -658,6 +678,70 @@ func diffSignals(previous, current map[string]Signal) []signalChange {
 		return signalKey(changes[i].Signal) < signalKey(changes[j].Signal)
 	})
 	return changes
+}
+
+type signalIdentity struct {
+	check string
+	kind  string
+	name  string
+	value string
+	path  string
+}
+
+func newSignalIdentity(signal Signal) signalIdentity {
+	return signalIdentity{
+		check: signal.Check,
+		kind:  signal.Kind,
+		name:  signal.Name,
+		value: signal.Value,
+		path:  signal.Path,
+	}
+}
+
+func unmatchedLineSignals(removed, added []Signal) ([]Signal, []Signal) {
+	sort.Slice(removed, func(i, j int) bool { return removed[i].Line < removed[j].Line })
+	sort.Slice(added, func(i, j int) bool { return added[i].Line < added[j].Line })
+	if len(removed) > len(added) {
+		return unmatchedByNearestLine(removed, added), nil
+	}
+	if len(added) > len(removed) {
+		return nil, unmatchedByNearestLine(added, removed)
+	}
+	return nil, nil
+}
+
+func unmatchedByNearestLine(larger, smaller []Signal) []Signal {
+	matched := make([]bool, len(larger))
+	for _, signal := range smaller {
+		match := -1
+		var nearest uint
+		for i, candidate := range larger {
+			if matched[i] {
+				continue
+			}
+			distance := lineDistance(signal.Line, candidate.Line)
+			if match == -1 || distance < nearest {
+				match = i
+				nearest = distance
+			}
+		}
+		matched[match] = true
+	}
+
+	unmatched := make([]Signal, 0, len(larger)-len(smaller))
+	for i, signal := range larger {
+		if !matched[i] {
+			unmatched = append(unmatched, signal)
+		}
+	}
+	return unmatched
+}
+
+func lineDistance(a, b uint) uint {
+	if a > b {
+		return a - b
+	}
+	return b - a
 }
 
 type errorChange struct {
