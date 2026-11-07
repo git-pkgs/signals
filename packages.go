@@ -21,7 +21,10 @@ const (
 	checkDependencyPinning    = "Dependency-Pinning"
 	checkLockfileIntegrity    = "Lockfile-Integrity"
 	checkPackageParse         = "Package-Parse"
+	checkPackageProvenance    = "Package-Provenance"
 	checkPinnedDependencies   = "Pinned-Dependencies"
+	packageProvenanceDisabled = "disabled"
+	packageProvenanceEnabled  = "enabled"
 )
 
 var packageChecks = map[string]bool{
@@ -137,6 +140,7 @@ func packageFileSignals(path string, data []byte) []Signal {
 		return signals
 	}
 
+	signals = append(signals, manifestProvenanceSignals(path, result)...)
 	switch result.Kind {
 	case manifests.Manifest:
 		signals = append(signals, manifestLicenseSignals(path, result)...)
@@ -145,6 +149,24 @@ func packageFileSignals(path string, data []byte) []Signal {
 		signals = append(signals, lockfileSignals(path, result)...)
 	}
 	return signals
+}
+
+func manifestProvenanceSignals(path string, result *manifests.ParseResult) []Signal {
+	provenance := result.Publication.Provenance
+	if provenance == nil {
+		return nil
+	}
+	value := packageProvenanceDisabled
+	if *provenance {
+		value = packageProvenanceEnabled
+	}
+	return []Signal{{
+		Check: checkPackageProvenance,
+		Kind:  result.Ecosystem,
+		Name:  result.Name,
+		Value: value,
+		Path:  path,
+	}}
 }
 
 func manifestLicenseSignals(path string, result *manifests.ParseResult) []Signal {
@@ -371,8 +393,10 @@ func nonzeroOID(oid string) string {
 
 func removePackageSignals(signals map[string]Signal, paths map[string]bool) {
 	for key, signal := range signals {
-		owned := packageChecks[signal.Check] || signal.Check == checkLicense &&
-			(signal.Kind == signalKindDeclaration || signal.Kind == signalKindFileReference)
+		owned := packageChecks[signal.Check] ||
+			signal.Check == checkPackageProvenance && signal.Kind == "npm" ||
+			signal.Check == checkLicense &&
+				(signal.Kind == signalKindDeclaration || signal.Kind == signalKindFileReference)
 		if owned && (paths == nil || paths[signal.Path]) {
 			delete(signals, key)
 		}

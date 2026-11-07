@@ -139,6 +139,7 @@ The additional detectors use the same persistent signal model:
 | Dependency-Update-Config | Dependabot and Renovate configuration, including package managers, directories, schedules, cooldowns, groups, and semantic configuration changes |
 | Package-Manager | The selected package manager for each detected package ecosystem and project directory |
 | Package-File | Manifest and lockfile presence, including files recognized by package-manager definitions before dependency parsing is available |
+| Package-Provenance | Explicit npm publication provenance settings in `publishConfig.provenance` or `.npmrc` |
 | Dependency-Constraint | Ranged, unparsed, and unversioned direct dependency constraints as written in parsed manifests |
 | Dependency-Pin | Exact direct dependency constraints found in parsed manifests |
 | Dependency-Pinning | Exact, ranged, unparsed, and resolved dependency counts from manifests and lockfiles |
