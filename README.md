@@ -1,6 +1,6 @@
 # signals
 
-A command for tracing security-relevant evidence stored in Git across repository history. It shows when detected evidence appears, changes, or disappears, with the commit and path behind each change. `signals` walks commit trees with [`github.com/git-pkgs/history`](https://github.com/git-pkgs/history). Local parsers detect workflow risks and permissions, CI and security tools, secrets, REUSE metadata, package managers, manifests, lockfiles, dependency pinning, update configuration, licenses, SBOMs, fuzzers, and binary artifacts. Commit data adds dependency-bot and signature events plus contributor, maintenance, review, and signing metrics. The output contains the evidence and its provenance without calculating a score. The scan reads local Git objects, with forge APIs, release APIs, credential validation, and external services disabled.
+A command for tracing security-relevant evidence stored in Git across repository history. It shows when detected evidence appears, changes, or disappears, with the commit and path behind each change. `signals` walks commit trees with [`github.com/git-pkgs/history`](https://github.com/git-pkgs/history). Local parsers detect workflow risks and permissions, artifact-provenance configuration, CI and security tools, secrets, REUSE metadata, package managers, manifests, lockfiles, dependency pinning, update configuration, licenses, SBOMs, fuzzers, and binary artifacts. Commit data adds dependency-bot and signature events plus contributor, maintenance, review, and signing metrics. The output contains the evidence and its provenance without calculating a score. The scan reads local Git objects, with forge APIs, release APIs, credential validation, and external services disabled.
 
 The local-only timeline answers questions about when repository evidence changed. Examples include:
 
@@ -131,6 +131,7 @@ The additional detectors use the same persistent signal model:
 
 | Check | Local evidence |
 | --- | --- |
+| Artifact-Provenance | GitHub artifact-attestation actions and SLSA generator reusable workflows, including the workflow path; configuration does not show that a run completed or its claims were verified |
 | CI | CI configuration detected by the Brief knowledge base, including GitHub Actions, GitLab CI, Azure Pipelines, CircleCI, Jenkins, Buildkite, Drone, and Travis CI |
 | Build | Tools classified as build tools by Brief, including Make, CMake, Meson, Bazel, Buck, and language-specific build tools |
 | Security-Tool | Security tools detected by Brief, with its taxonomy function retained as the signal kind |
@@ -177,7 +178,7 @@ The local detectors share parsers and changed-path caches across related signals
 - [`github.com/git-pkgs/roles`](https://github.com/git-pkgs/roles) classifies CI, fuzz, legal, generated, vendored, and packaging paths.
 - [`github.com/git-pkgs/secrets`](https://github.com/git-pkgs/secrets) scans changed blob content with its embedded local rule corpus.
 
-Actionlint parses each changed Actions workflow once for Dangerous-Workflow, SAST, Token-Permissions, Cache-Mode, Job-Timeout, Packaging, Package-Provenance, and Runner-Selection signals. Package parsing separately records Actions references and their pinning state. Packaging observations cover known Actions and literal commands in `run:` steps without treating their presence as evidence of a successful workflow run. Package provenance requires an explicit npm setting, or an OIDC-enabled PyPI publication without a configured password or uv token. Runner observations record configuration without determining which machine handled a particular job.
+Actionlint parses each changed Actions workflow once for Artifact-Provenance, Dangerous-Workflow, SAST, Token-Permissions, Cache-Mode, Job-Timeout, Packaging, Package-Provenance, and Runner-Selection signals. Package parsing separately records Actions references and their pinning state. Packaging observations cover known Actions and literal commands in `run:` steps without treating their presence as evidence of a successful workflow run. Package provenance requires an explicit npm setting, or an OIDC-enabled PyPI publication without a configured password or uv token. Runner observations record configuration without determining which machine handled a particular job.
 
 ## Development
 
