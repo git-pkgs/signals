@@ -174,6 +174,43 @@ jobs:
 	}
 }
 
+func TestLogDetectsCommittedAttestationClaims(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.name", "Signals Test")
+	gitRun(t, repo, "config", "user.email", "signals@example.com")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+
+	writeFile(t, repo, "README.md", "# example\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Initial commit")
+
+	writeFile(t, repo, testAttestationPath, testAttestationStatement)
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Commit provenance claim")
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{testLogCommand, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
+		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
+	}
+	for _, expected := range []string{
+		"+ Attestation/claim https://slsa.dev/provenance/v1 at provenance.intoto.jsonl",
+		"+ Attestation/builder-claim at provenance.intoto.jsonl = https://github.com/example/project/.github/workflows/release.yml@refs/heads/main",
+		"+ Attestation/source-claim https://github.com/example/project at provenance.intoto.jsonl = deadbeef",
+		"+ Attestation/subject-claim dist/example.tar.gz at provenance.intoto.jsonl = sha256:0123456789abcdef",
+	} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Errorf("output missing %q:\n%s", expected, stdout.String())
+		}
+	}
+	if strings.Contains(stdout.String(), "verified") {
+		t.Fatalf("claim output implies verification:\n%s", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected detection errors:\n%s", stderr.String())
+	}
+}
+
 func TestLogTracksSecurityDocumentation(t *testing.T) {
 	repo := t.TempDir()
 	gitRun(t, repo, "init", "-b", "main")

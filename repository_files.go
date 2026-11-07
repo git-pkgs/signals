@@ -18,6 +18,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/git-pkgs/attestation"
 	"github.com/git-pkgs/brief/kb"
 	gitcerts "github.com/git-pkgs/certs"
 	"github.com/git-pkgs/cwe"
@@ -41,6 +42,11 @@ var binaryArtifactExtensions = map[string]bool{
 	".efi": true, ".exe": true, ".iso": true, ".jar": true, ".lib": true,
 	".msi": true, ".o": true, ".ocx": true, ".par": true, ".pyc": true,
 	".pyo": true, ".rpm": true, ".so": true, ".wasm": true, ".whl": true,
+}
+
+var attestationFileSuffixes = [...]string{
+	".attestation.json", ".attestations.json", ".intoto.json", ".intoto.jsonl",
+	".sigstore", ".sigstore.json",
 }
 
 type fuzzPattern struct {
@@ -77,6 +83,7 @@ var sonarPOMPattern = regexp.MustCompile(`<sonar\.host\.url>\s*([^<\s]+)\s*</son
 const (
 	repositoryFilePrefixBytes         = 1024
 	repositoryFileContentBytes  int64 = 1 << 20
+	attestationContentBytes     int64 = 8 << 20
 	repositoryFileLineBytes           = 1 << 20
 	repositoryFileScanBytes           = 64 << 10
 	repositoryFileMatchBytes          = 4 << 10
@@ -379,6 +386,13 @@ func repositoryStructuredSignals(
 	filePath string,
 	rules *repositoryPathRules,
 ) ([]Signal, error) {
+	if attestationFilePath(filePath) {
+		data, err := readRepositoryFile(tree, filePath, attestationContentBytes+1)
+		if err != nil {
+			return nil, err
+		}
+		return attestationSignals(filePath, data), nil
+	}
 	if goreleaserConfigPath(filePath) {
 		data, err := readRepositoryFile(tree, filePath, repositoryFileContentBytes)
 		if err != nil {
@@ -401,6 +415,84 @@ func repositoryStructuredSignals(
 		}
 		return []Signal{signal}, err
 	})
+}
+
+func attestationFilePath(filePath string) bool {
+	if !repositoryProjectEvidencePath(filePath) {
+		return false
+	}
+	lower := strings.ToLower(path.Base(filePath))
+	for _, suffix := range attestationFileSuffixes {
+		if strings.HasSuffix(lower, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+func attestationSignals(filePath string, data []byte) []Signal {
+	if int64(len(data)) > attestationContentBytes {
+		return []Signal{{Check: checkAttestation, Kind: signalKindCandidate, Name: "oversized", Path: filePath}}
+	}
+	claims, err := attestation.ParseAll(data)
+	if err != nil {
+		return []Signal{{Check: checkAttestation, Kind: signalKindCandidate, Name: "malformed", Path: filePath}}
+	}
+	if len(claims) == 0 {
+		return []Signal{{Check: checkAttestation, Kind: signalKindCandidate, Name: "unrecognized", Path: filePath}}
+	}
+	var signals []Signal
+	for _, claim := range claims {
+		signals = append(signals, Signal{
+			Check: checkAttestation,
+			Kind:  "claim",
+			Name:  claim.PredicateType,
+			Path:  filePath,
+		})
+		if claim.BuilderID != "" {
+			signals = append(signals, Signal{
+				Check: checkAttestation,
+				Kind:  "builder-claim",
+				Value: claim.BuilderID,
+				Path:  filePath,
+			})
+		}
+		if claim.SourceRepository != "" || claim.SourceRevision != "" {
+			signals = append(signals, Signal{
+				Check: checkAttestation,
+				Kind:  "source-claim",
+				Name:  claim.SourceRepository,
+				Value: claim.SourceRevision,
+				Path:  filePath,
+			})
+		}
+		if claim.SignerIdentity != "" {
+			signals = append(signals, Signal{
+				Check: checkAttestation,
+				Kind:  "signer-claim",
+				Value: claim.SignerIdentity,
+				Path:  filePath,
+			})
+		}
+		for _, subject := range claim.Subjects {
+			algorithms := make([]string, 0, len(subject.Digest))
+			for algorithm := range subject.Digest {
+				algorithms = append(algorithms, algorithm)
+			}
+			sort.Strings(algorithms)
+			for _, algorithm := range algorithms {
+				signals = append(signals, Signal{
+					Check: checkAttestation,
+					Kind:  "subject-claim",
+					Name:  subject.Name,
+					Value: algorithm + ":" + subject.Digest[algorithm],
+					Path:  filePath,
+				})
+			}
+		}
+	}
+	sortSignals(signals)
+	return deduplicateSignals(signals)
 }
 
 func readRepositoryFile(tree fs.FS, filePath string, limit int64) ([]byte, error) {
@@ -763,7 +855,7 @@ func sbomSignal(filePath string, named bool, reader io.Reader) (Signal, bool, er
 		}
 		return Signal{
 			Check: checkSBOM,
-			Kind:  "candidate",
+			Kind:  signalKindCandidate,
 			Name:  path.Base(filePath),
 			Path:  filePath,
 			Line:  1,
@@ -804,7 +896,7 @@ func sarifSignals(filePath string, reader io.Reader) ([]Signal, error) {
 	if errors.Is(err, sarifsummary.ErrInvalid) {
 		return []Signal{{
 			Check: checkSARIF,
-			Kind:  "candidate",
+			Kind:  signalKindCandidate,
 			Name:  sarifInvalidName,
 			Path:  filePath,
 		}}, nil
@@ -1222,7 +1314,7 @@ func (d *localDetectors) runRepositoryFiles(
 
 	delete(current.errors, detectorRepositoryFiles)
 	checks := []string{
-		checkArtifactSigning, checkBinaryArtifacts, checkCertificate, checkFuzzing, checkLicense, checkSARIF,
+		checkArtifactSigning, checkAttestation, checkBinaryArtifacts, checkCertificate, checkFuzzing, checkLicense, checkSARIF,
 		checkSAST, checkSBOM, checkSBOMGeneration,
 		checkSecurityChangelog, checkSecurityDocumentation, checkSecurityPolicy, checkShellDependency,
 		checkSubresourceIntegrity,
