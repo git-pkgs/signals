@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -10,12 +11,13 @@ import (
 	"path"
 	"regexp"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	githistory "github.com/git-pkgs/history"
 	gitlanguages "github.com/git-pkgs/languages"
-	"github.com/git-pkgs/licensecheck"
+	gitlicenses "github.com/git-pkgs/licenses"
 	"github.com/git-pkgs/magic"
 	"github.com/git-pkgs/roles"
 	"github.com/git-pkgs/sbom"
@@ -89,6 +91,7 @@ type repositoryFileCacheKey struct {
 }
 
 func repositoryFileSignalsForChanges(
+	ctx context.Context,
 	tree fs.FS,
 	changes []githistory.Change,
 	cache map[repositoryFileCacheKey][]Signal,
@@ -116,7 +119,7 @@ func repositoryFileSignalsForChanges(
 			continue
 		}
 
-		parsed, err := repositoryFileSignalsFromFS(tree, filePath)
+		parsed, err := repositoryFileSignalsFromFS(ctx, tree, filePath)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
@@ -132,7 +135,7 @@ func repositoryFileSignalsForChanges(
 	return deduplicateSignals(signals), paths, nil
 }
 
-func allRepositoryFileSignals(tree fs.FS) ([]Signal, error) {
+func allRepositoryFileSignals(ctx context.Context, tree fs.FS) ([]Signal, error) {
 	var signals []Signal
 	err := fs.WalkDir(tree, ".", func(filePath string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -141,7 +144,7 @@ func allRepositoryFileSignals(tree fs.FS) ([]Signal, error) {
 		if filePath == "." || entry.IsDir() {
 			return nil
 		}
-		parsed, err := repositoryFileSignalsFromFS(tree, filePath)
+		parsed, err := repositoryFileSignalsFromFS(ctx, tree, filePath)
 		if err != nil {
 			return fmt.Errorf("read repository file %s: %w", filePath, err)
 		}
@@ -155,7 +158,7 @@ func allRepositoryFileSignals(tree fs.FS) ([]Signal, error) {
 	return deduplicateSignals(signals), nil
 }
 
-func repositoryFileSignalsFromFS(tree fs.FS, filePath string) ([]Signal, error) {
+func repositoryFileSignalsFromFS(ctx context.Context, tree fs.FS, filePath string) ([]Signal, error) {
 	prefix, err := readRepositoryFile(tree, filePath, repositoryFilePrefixBytes)
 	if err != nil {
 		return nil, err
@@ -166,12 +169,16 @@ func repositoryFileSignalsFromFS(tree fs.FS, filePath string) ([]Signal, error) 
 	}
 
 	license, notice := legalFileKinds(filePath)
-	if license {
+	if license || notice {
 		data, err := readRepositoryFile(tree, filePath, repositoryFileContentBytes)
 		if err != nil {
 			return nil, err
 		}
-		signals = append(signals, licenseSignals(filePath, data)...)
+		matched, err := licenseSignals(ctx, filePath, data, license)
+		if err != nil {
+			return nil, err
+		}
+		signals = append(signals, matched...)
 	}
 	if notice {
 		signals = append(signals, Signal{
@@ -345,32 +352,44 @@ func legalDocumentPath(filePath string) bool {
 	}
 }
 
-func licenseSignals(filePath string, data []byte) []Signal {
-	coverage := licensecheck.Scan(data)
-	seen := make(map[string]bool)
+func licenseSignals(
+	ctx context.Context,
+	filePath string,
+	data []byte,
+	reportNoAssertion bool,
+) ([]Signal, error) {
+	matcher, err := repositoryLicenseMatcher()
+	if err != nil {
+		return nil, fmt.Errorf("load license matcher: %w", err)
+	}
+	result, err := matcher.Match(ctx, data)
+	if err != nil {
+		return nil, fmt.Errorf("match license file %s: %w", filePath, err)
+	}
 	var signals []Signal
-	for _, match := range coverage.Match {
-		if match.ID == "" || seen[match.ID] {
-			continue
-		}
-		seen[match.ID] = true
+	for _, detection := range result.Detections {
 		signals = append(signals, Signal{
 			Check: checkLicense,
 			Kind:  signalKindLicense,
-			Name:  match.ID,
+			Name:  detection.Expression,
 			Path:  filePath,
 		})
 	}
-	if len(signals) == 0 {
+	if len(signals) == 0 && reportNoAssertion {
 		signals = append(signals, Signal{
 			Check: checkLicense,
 			Kind:  signalKindLicense,
 			Name:  "NOASSERTION",
 			Path:  filePath,
+			Line:  1,
 		})
 	}
-	return signals
+	return signals, nil
 }
+
+var repositoryLicenseMatcher = sync.OnceValues(func() (*gitlicenses.Matcher, error) {
+	return gitlicenses.New()
+})
 
 func sbomSignal(filePath string, reader io.Reader) (Signal, bool, error) {
 	metadata, err := sbom.Inspect(reader)
@@ -607,6 +626,7 @@ func lineForOffset(data []byte, offset int) uint {
 }
 
 func (d *localDetectors) runRepositoryFiles(
+	ctx context.Context,
 	tree fs.FS,
 	changes []githistory.Change,
 	run, forceFull bool,
@@ -625,9 +645,14 @@ func (d *localDetectors) runRepositoryFiles(
 	var paths []string
 	var err error
 	if forceFull {
-		signals, err = allRepositoryFileSignals(tree)
+		signals, err = allRepositoryFileSignals(ctx, tree)
 	} else {
-		signals, paths, err = repositoryFileSignalsForChanges(tree, changes, d.repositoryFileCache)
+		signals, paths, err = repositoryFileSignalsForChanges(
+			ctx,
+			tree,
+			changes,
+			d.repositoryFileCache,
+		)
 	}
 	detectorStats.duration += time.Since(started)
 	if err != nil {

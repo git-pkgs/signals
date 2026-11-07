@@ -119,7 +119,7 @@ Nine checks retain names used by Scorecard, but their evidence is detected by lo
 | Dangerous-Workflow | Script injection and untrusted checkout patterns parsed with Actionlint | None |
 | Dependency-Update-Tool | Dependabot, Renovate, and Scala Steward configuration | Dependabot-authored commit search |
 | Fuzzing | ClusterFuzzLite configuration and language-specific source patterns outside bundled or derived paths | OSS-Fuzz membership |
-| License | License and notice files classified by path, license text identified from file contents, and license values or file references declared by parsed manifests | Forge license classification |
+| License | License and notice files classified by path, license expressions identified in their contents, and license values or file references declared by parsed manifests | Forge license classification |
 | SAST | Known Actions, Sonar configuration, and Qodana configuration | Successful check runs |
 | SBOM | SPDX and CycloneDX documents detected from content, plus named candidates that cannot be parsed | Release assets |
 | Security-Policy | Accepted policy paths with extracted email addresses and links | Inherited policy from the organization `.github` repository |
@@ -161,7 +161,7 @@ Brief reads commit trees through `history.TreeFS` and reruns only when Brief's c
 The local detectors share parsers and changed-path caches across related signals:
 
 - [`github.com/git-pkgs/magic`](https://github.com/git-pkgs/magic) detects binary content.
-- [`github.com/git-pkgs/licensecheck`](https://github.com/git-pkgs/licensecheck) identifies license text.
+- [`github.com/git-pkgs/licenses`](https://github.com/git-pkgs/licenses) identifies license text, notices, and SPDX declarations with its embedded ScanCode corpus.
 - [`github.com/git-pkgs/manifests`](https://github.com/git-pkgs/manifests) parses package metadata, declared licenses, Actions, Docker, NuGet, and other dependency files.
 - [`github.com/git-pkgs/managers`](https://github.com/git-pkgs/managers) identifies package managers and their manifest or lockfile evidence from commit trees.
 - [`github.com/git-pkgs/sbom`](https://github.com/git-pkgs/sbom) identifies and parses SPDX and CycloneDX JSON documents.

@@ -309,9 +309,13 @@ version = "1.0.0"
 license = "MIT OR Apache-2.0"
 license-file = "COPYING"
 `)
-	writeFile(t, repo, "NOTICE", "Third-party notices\n")
+	writeFile(t, repo, "NOTICE", "Third-party notices\n\n"+mitLicenseText)
 	gitRun(t, repo, "add", ".")
 	gitRun(t, repo, "commit", "-m", "Declare licensing")
+
+	writeFile(t, repo, "NOTICE", "Example 1.0\nThird-party notices\n\n"+mitLicenseText)
+	gitRun(t, repo, "add", "NOTICE")
+	gitRun(t, repo, "commit", "-m", "Update notice heading")
 
 	writeFile(t, repo, "Cargo.toml", `[package]
 name = "example"
@@ -333,15 +337,20 @@ license = "Apache-2.0"
 	for _, expected := range []string{
 		"+ License/declaration MIT OR Apache-2.0 at Cargo.toml",
 		"+ License/file-reference at Cargo.toml = COPYING",
+		"+ License/license MIT at NOTICE",
 		"+ License/notice at NOTICE",
 		"- License/declaration MIT OR Apache-2.0 at Cargo.toml",
 		"+ License/declaration Apache-2.0 at Cargo.toml",
 		"- License/file-reference at Cargo.toml = COPYING",
+		"- License/license MIT at NOTICE",
 		"- License/notice at NOTICE",
 	} {
 		if !strings.Contains(output, expected) {
 			t.Errorf("output missing %q:\n%s", expected, output)
 		}
+	}
+	if count := strings.Count(output, "License/license MIT at NOTICE"); count != 2 {
+		t.Fatalf("license signal changed when its line moved, got %d changes:\n%s", count, output)
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("unexpected detection errors:\n%s", stderr.String())

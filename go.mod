@@ -4,10 +4,10 @@ go 1.27.3
 
 require (
 	actionlint.kjanat.dev v1.17.0
-	github.com/git-pkgs/brief v0.15.1-0.20261107154656-c5ba1807b6cb
+	github.com/git-pkgs/brief v0.15.1-0.20261107204040-d1ed5a631f83
 	github.com/git-pkgs/history v0.2.0
 	github.com/git-pkgs/languages v0.1.0
-	github.com/git-pkgs/licensecheck v0.4.1
+	github.com/git-pkgs/licenses v0.10.1-0.20261107154534-00c5bf03ade8
 	github.com/git-pkgs/magic v0.6.0
 	github.com/git-pkgs/mailmap v0.1.1
 	github.com/git-pkgs/managers v0.13.0

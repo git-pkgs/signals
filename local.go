@@ -188,7 +188,7 @@ func (d *localDetectors) detect(
 	d.runBrief(tree, briefPaths, briefRun, briefFull, &current, stats)
 	d.runDependencyUpdateConfigs(tree, dependencyUpdateRun, dependencyUpdateFull, &current, stats)
 	d.runPackages(tree, changes, packageRun, packageFull, &current, stats)
-	d.runRepositoryFiles(tree, changes, repositoryFileRun, repositoryFileFull, &current, stats)
+	d.runRepositoryFiles(ctx, tree, changes, repositoryFileRun, repositoryFileFull, &current, stats)
 	d.runWorkflows(tree, changes, workflowRun, workflowFull, &current, stats)
 	d.runPackageManagers(
 		tree,
