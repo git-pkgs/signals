@@ -36,6 +36,7 @@ const (
 	checkThreatSurface     = "Threat-Surface"
 
 	detectorBrief           = "Brief"
+	detectorAgentSkills     = "Agent-Skills"
 	detectorRepositoryFiles = "Repository-Files"
 	detectorWorkflows       = "Workflows"
 
@@ -44,6 +45,7 @@ const (
 )
 
 var localDetectorNames = []string{
+	detectorAgentSkills,
 	detectorBrief,
 	checkDependencyUpdateConfig,
 	detectorPackages,
@@ -155,6 +157,8 @@ func (d *localDetectors) detect(
 	briefFull := forceFull || parent.errors[detectorBrief] != "" ||
 		d.briefLanguagesMayChange(changes, briefPaths, parent.briefLanguages, languagesChanged)
 	briefRun := briefFull || len(briefPaths) > 0
+	agentSkillFull := forceFull || parent.errors[detectorAgentSkills] != ""
+	agentSkillRun := agentSkillFull || agentSkillsAffected(changes, parent.signals)
 	dependencyUpdateFull := forceFull || parent.errors[checkDependencyUpdateConfig] != ""
 	dependencyUpdateRun := dependencyUpdateFull || dependencyUpdateConfigAffected(changedPaths(changes))
 	packageFull := forceFull || parent.errors[detectorPackages] != ""
@@ -181,7 +185,7 @@ func (d *localDetectors) detect(
 	reuseRun := reuseFull || parent.reuseActive && len(changes) > 0
 
 	var tree fs.FS
-	if anyDetectorRuns(briefRun, dependencyUpdateRun, packageRun, repositoryFileRun, workflowRun, managerRun, reuseRun) {
+	if anyDetectorRuns(agentSkillRun, briefRun, dependencyUpdateRun, packageRun, repositoryFileRun, workflowRun, managerRun, reuseRun) {
 		var err error
 		tree, err = d.repo.TreeFS(commit.Hash)
 		if err != nil {
@@ -189,6 +193,7 @@ func (d *localDetectors) detect(
 		}
 	}
 
+	d.runAgentSkills(tree, agentSkillRun, &current, stats)
 	d.runBrief(tree, briefPaths, briefRun, briefFull, &current, stats)
 	d.runDependencyUpdateConfigs(tree, dependencyUpdateRun, dependencyUpdateFull, &current, stats)
 	d.runPackages(tree, changes, packageRun, packageFull, &current, stats)
@@ -206,6 +211,30 @@ func (d *localDetectors) detect(
 	d.runSecrets(ctx, commit, changes, secretFull, &current, stats)
 	d.runREUSE(tree, changes, reuseRun, reuseFull, &current, stats)
 	return current, nil
+}
+
+func (d *localDetectors) runAgentSkills(
+	tree fs.FS,
+	run bool,
+	current *commitState,
+	stats *scanStats,
+) {
+	detectorStats := stats.detectors[detectorAgentSkills]
+	if !run {
+		detectorStats.skipped++
+		return
+	}
+	recordDetectorRun(detectorStats, true)
+	started := time.Now()
+	signals, err := agentSkillSignals(tree)
+	detectorStats.duration += time.Since(started)
+	if err != nil {
+		current.errors[detectorAgentSkills] = err.Error()
+		return
+	}
+	delete(current.errors, detectorAgentSkills)
+	removeCheckSignals(current.signals, checkAgentSkill)
+	addSignals(current.signals, signals)
 }
 
 func anyDetectorRuns(runs ...bool) bool {

@@ -6,6 +6,7 @@ import (
 )
 
 const (
+	checkAgentSkill           = "Agent-Skill"
 	checkArtifactProvenance   = "Artifact-Provenance"
 	checkBinaryArtifacts      = "Binary-Artifacts"
 	checkCertificate          = "Certificate"
