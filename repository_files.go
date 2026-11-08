@@ -124,6 +124,7 @@ type repositoryFileCacheKey struct {
 
 type repositoryPathRules struct {
 	changelog         *kb.ResourceInfo
+	ownership         *ownershipRules
 	policy            *kb.ResourceInfo
 	sbom              *kb.ResourceInfo
 	qodana            *kb.ToolDef
@@ -134,6 +135,7 @@ type repositoryPathRules struct {
 func newRepositoryPathRules(knowledge *kb.KnowledgeBase) *repositoryPathRules {
 	return &repositoryPathRules{
 		changelog:         knowledge.Resource("", "changelog"),
+		ownership:         newOwnershipRules(knowledge),
 		policy:            knowledge.Resource("security", "policy"),
 		sbom:              knowledge.Resource("metadata", "sbom"),
 		qodana:            knowledge.ByName["Qodana"],
@@ -237,7 +239,11 @@ func repositoryFileSignalsFromFS(
 	if signal, ok := binaryArtifactSignal(filePath, prefix, true); ok {
 		signals = append(signals, signal)
 	}
-	signals = append(signals, rules.securityDocumentSignals(filePath)...)
+	documents, err := repositoryDocumentSignals(tree, filePath, size, rules)
+	if err != nil {
+		return nil, err
+	}
+	signals = append(signals, documents...)
 
 	certificates, err := repositoryCertificateSignals(ctx, tree, filePath, prefix, size)
 	if err != nil {
@@ -281,12 +287,6 @@ func repositoryFileSignalsFromFS(
 		signals = append(signals, parsed...)
 	}
 
-	parsed, err := repositoryChangelogSignals(tree, filePath, rules)
-	if err != nil {
-		return nil, err
-	}
-	signals = append(signals, parsed...)
-
 	if subresourceMarkupPath(filePath) {
 		parsed, err := scanRepositoryFile(tree, filePath, func(reader io.Reader) ([]Signal, error) {
 			return subresourceIntegritySignals(filePath, reader)
@@ -319,7 +319,7 @@ func repositoryFileSignalsFromFS(
 		}
 	}
 
-	parsed, err = shellRepositoryFileSignals(tree, filePath, prefix, shell)
+	parsed, err := shellRepositoryFileSignals(tree, filePath, prefix, shell)
 	if err != nil {
 		return nil, err
 	}
@@ -1085,6 +1085,22 @@ func (rules *repositoryPathRules) securityDocumentSignals(filePath string) []Sig
 	return rules.securityDocuments.signals(filePath)
 }
 
+func repositoryDocumentSignals(
+	tree fs.FS,
+	filePath string,
+	size int64,
+	rules *repositoryPathRules,
+) ([]Signal, error) {
+	signals := rules.securityDocumentSignals(filePath)
+	ownership, err := repositoryOwnershipSignals(tree, filePath, size, rules.ownership)
+	if err != nil {
+		return nil, err
+	}
+	signals = append(signals, ownership...)
+	changelog, err := repositoryChangelogSignals(tree, filePath, rules)
+	return append(signals, changelog...), err
+}
+
 func repositoryChangelogSignals(tree fs.FS, filePath string, rules *repositoryPathRules) ([]Signal, error) {
 	if !rules.changelogPath(filePath) {
 		return nil, nil
@@ -1314,7 +1330,8 @@ func (d *localDetectors) runRepositoryFiles(
 
 	delete(current.errors, detectorRepositoryFiles)
 	checks := []string{
-		checkArtifactSigning, checkAttestation, checkBinaryArtifacts, checkCertificate, checkFuzzing, checkLicense, checkSARIF,
+		checkArtifactSigning, checkAttestation, checkBinaryArtifacts, checkCertificate, checkFuzzing, checkLicense,
+		checkRepositoryOwnership, checkSARIF,
 		checkSAST, checkSBOM, checkSBOMGeneration,
 		checkSecurityChangelog, checkSecurityDocumentation, checkSecurityPolicy, checkShellDependency,
 		checkSubresourceIntegrity,
