@@ -385,6 +385,22 @@ func TestRepositoryFileSignalsIgnoreBundledSecurityEvidence(t *testing.T) {
 	}
 }
 
+func TestRepositoryFileSignalsUsesBriefChangelogPaths(t *testing.T) {
+	signals := repositorySignals(t, testChangelogPath, []byte("## Security\n\n- "+testSecurityChangelogEntry+"\n"))
+	wanted := Signal{
+		Check: checkSecurityChangelog,
+		Kind:  signalKindChangelogEntry,
+		Value: testSecurityChangelogEntry,
+		Path:  testChangelogPath,
+	}
+	if !containsExactSignal(signals, wanted) {
+		t.Fatalf("signals = %#v", signals)
+	}
+	if signals := repositorySignals(t, "docs/CHANGELOG.md", []byte("Security fix\n")); len(signals) != 0 {
+		t.Fatalf("unconfigured changelog path signals = %#v", signals)
+	}
+}
+
 func TestRepositoryFileSignalsDoesNotTreatSourceNamesAsLegalEvidence(t *testing.T) {
 	for _, filePath := range []string{"notice.go", "licenses/_spdx.py"} {
 		if signals := repositorySignals(t, filePath, []byte("package example\n")); len(signals) != 0 {

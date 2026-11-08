@@ -218,6 +218,46 @@ func TestLogUsesBriefSecurityPathDefinitions(t *testing.T) {
 	}
 }
 
+func TestLogDetectsStableSecurityChangelogEntries(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.name", "Signals Test")
+	gitRun(t, repo, "config", "user.email", "signals@example.com")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+
+	writeFile(t, repo, "README.md", "# example\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Initial commit")
+
+	oldEntry := "# 1.0.0\n\n## Security\n\n- Reject unsafe archive paths\n"
+	writeFile(t, repo, testChangelogPath, oldEntry)
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Document security hardening")
+
+	writeFile(t, repo, testChangelogPath, "# 1.1.0\n\n## Fixed\n\n- Fix CVE-2026-12345\n\n"+oldEntry)
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Document security advisory")
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"log", testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
+		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
+	}
+	for _, expected := range []string{
+		"+ Security-Changelog/entry at CHANGELOG.md = Reject unsafe archive paths",
+		"+ Security-Changelog/advisory CVE-2026-12345 at CHANGELOG.md = Fix CVE-2026-12345",
+	} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Errorf("output missing %q:\n%s", expected, stdout.String())
+		}
+	}
+	if strings.Contains(stdout.String(), "- Security-Changelog/entry") {
+		t.Fatalf("stable changelog entry was removed after moving down the file:\n%s", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected detection errors:\n%s", stderr.String())
+	}
+}
+
 func TestLogDetectsDependencyUpdateConfigChanges(t *testing.T) {
 	repo := t.TempDir()
 	gitRun(t, repo, "init", "-b", "main")
