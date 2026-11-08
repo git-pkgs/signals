@@ -106,3 +106,24 @@ Fixed
 		t.Fatalf("signals = %#v", signals)
 	}
 }
+
+func TestSecurityChangelogSignalsSupportsLongLines(t *testing.T) {
+	t.Parallel()
+
+	const advisory = "CVE-2026-12345"
+	longEntry := strings.Repeat("x", 1<<20) + " " + advisory
+	signals, err := securityChangelogSignals(testChangelogPath, strings.NewReader(longEntry))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wanted := Signal{
+		Check: checkSecurityChangelog,
+		Kind:  signalKindAdvisory,
+		Name:  advisory,
+		Value: truncateChangelogValue(longEntry),
+		Path:  testChangelogPath,
+	}
+	if !containsExactSignal(signals, wanted) {
+		t.Fatalf("missing %#v in %#v", wanted, signals)
+	}
+}

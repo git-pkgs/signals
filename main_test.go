@@ -67,7 +67,7 @@ jobs:
 		"+ Pinned-Dependencies/GitHubAction actions/checkout at .github/workflows/ci.yml = unpinned",
 		"+ Pinned-Dependencies/GitHubAction example/action at .github/workflows/ci.yml = unpinned",
 		"+ SAST/tool CodeQL at .github/workflows/ci.yml",
-		"+ Security-Policy/policy at SECURITY.md:1",
+		testSecurityPolicyAdded,
 		"+ Token-Permissions/topLevel",
 		"Remove security policy",
 		"- Security-Policy/policy at SECURITY.md:1",
@@ -256,6 +256,40 @@ func TestLogDetectsStableSecurityChangelogEntries(t *testing.T) {
 	}
 	if strings.Contains(stdout.String(), "Refresh population sample") {
 		t.Fatalf("unrelated heading produced changelog evidence:\n%s", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected detection errors:\n%s", stderr.String())
+	}
+}
+
+func TestLogAcceptsLongSecurityChangelogLines(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.name", "Signals Test")
+	gitRun(t, repo, "config", "user.email", "signals@example.com")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+
+	writeFile(t, repo, "README.md", "# Example\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Initial commit")
+
+	longEntry := strings.Repeat("x", 1<<20) + " CVE-2026-12345\n"
+	writeFile(t, repo, testChangelogPath, longEntry)
+	writeFile(t, repo, "SECURITY.md", "# Security policy\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Document security guidance")
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"log", testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
+		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
+	}
+	for _, expected := range []string{
+		"+ Security-Changelog/advisory CVE-2026-12345 at CHANGELOG.md",
+		testSecurityPolicyAdded,
+	} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Errorf("output missing %q:\n%s", expected, stdout.String())
+		}
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("unexpected detection errors:\n%s", stderr.String())

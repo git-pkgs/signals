@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"io"
 	"regexp"
 	"strings"
@@ -10,7 +11,6 @@ import (
 )
 
 const (
-	changelogLineBytes          = 1 << 20
 	changelogUnderlineMinLength = 3
 	changelogValueRunes         = 512
 )
@@ -24,27 +24,28 @@ var (
 func securityChangelogSignals(filePath string, reader io.Reader) ([]Signal, error) {
 	parser := securityChangelogParser{filePath: filePath}
 	var pending string
-	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(nil, changelogLineBytes)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	buffered := bufio.NewReader(reader)
+	for {
+		text, err := buffered.ReadString('\n')
+		line := strings.TrimSpace(text)
 		if line == "" {
 			parser.addLine(pending)
 			pending = ""
-			continue
-		}
-		if level, isUnderline := changelogUnderlineHeading(line); isUnderline && changelogHeadingCandidate(pending) {
+		} else if level, isUnderline := changelogUnderlineHeading(line); isUnderline && changelogHeadingCandidate(pending) {
 			parser.addHeading(level, pending)
 			pending = ""
-			continue
+		} else {
+			parser.addLine(pending)
+			pending = line
 		}
-		parser.addLine(pending)
-		pending = line
+		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				return nil, err
+			}
+			break
+		}
 	}
 	parser.addLine(pending)
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
 	sortSignals(parser.signals)
 	return deduplicateSignals(parser.signals), nil
 }

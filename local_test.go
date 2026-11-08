@@ -10,16 +10,17 @@ import (
 )
 
 const (
-	testRubyName          = "Ruby"
-	testRubyPath          = "app.rb"
-	testSemgrepConfigPath = ".semgrep.yml"
-	testSemgrepName       = "Semgrep"
-	testSecurityCategory  = "security"
-	testSecurityScanKind  = "security-scanning"
-	testTemplatePath      = "template.yml"
-	testThreatCWE         = "CWE-79"
-	testThreatXSS         = "xss"
-	testWorkflowPath      = ".github/workflows/ci.yml"
+	testRubyName            = "Ruby"
+	testRubyPath            = "app.rb"
+	testSemgrepConfigPath   = ".semgrep.yml"
+	testSemgrepName         = "Semgrep"
+	testSecurityCategory    = "security"
+	testSecurityPolicyAdded = "+ Security-Policy/policy at SECURITY.md:1"
+	testSecurityScanKind    = "security-scanning"
+	testTemplatePath        = "template.yml"
+	testThreatCWE           = "CWE-79"
+	testThreatXSS           = "xss"
+	testWorkflowPath        = ".github/workflows/ci.yml"
 )
 
 func TestRunBriefRefreshesOnlyCheckedTools(t *testing.T) {
