@@ -15,6 +15,9 @@ const (
 	testSemgrepConfigPath = ".semgrep.yml"
 	testSemgrepName       = "Semgrep"
 	testSecurityScanKind  = "security-scanning"
+	testTemplatePath      = "template.yml"
+	testThreatCWE         = "CWE-79"
+	testThreatXSS         = "xss"
 	testWorkflowPath      = ".github/workflows/ci.yml"
 )
 
@@ -56,6 +59,61 @@ func TestRunBriefRefreshesOnlyCheckedTools(t *testing.T) {
 		Path:  testSemgrepConfigPath,
 	}) {
 		t.Fatalf("unchanged Semgrep signal was removed: %#v", current.signals)
+	}
+}
+
+func TestRunBriefRefreshesThreatsForCheckedTools(t *testing.T) {
+	tool := &kb.ToolDef{
+		Tool:     kb.ToolInfo{Name: "Template Engine", Category: "framework"},
+		Detect:   kb.DetectInfo{Files: []string{testTemplatePath}},
+		Config:   kb.ConfigInfo{Files: []string{testTemplatePath}},
+		Taxonomy: kb.Taxonomy{Function: []string{"templating"}},
+	}
+	source := &kb.KnowledgeBase{
+		Tools:          []*kb.ToolDef{tool},
+		ByName:         map[string]*kb.ToolDef{tool.Tool.Name: tool},
+		ByCategory:     map[string][]*kb.ToolDef{tool.Tool.Category: {tool}},
+		Ecosystems:     make(map[string][]*kb.ToolDef),
+		Threats:        map[string]kb.ThreatDef{testThreatXSS: {ID: testThreatXSS, CWE: testThreatCWE}},
+		ThreatMappings: []kb.ThreatMapping{{Match: []string{"function:templating"}, Threats: []string{testThreatXSS}}},
+	}
+	knowledge := signalKnowledgeBase(source)
+	detectors := &localDetectors{
+		knowledge:   knowledge,
+		briefImpact: newBriefImpactReport(knowledge),
+	}
+	current := emptyCommitState()
+	stats := &scanStats{detectors: map[string]*detectorStats{detectorBrief: {}}}
+
+	detectors.runBrief(
+		fstest.MapFS{testTemplatePath: {Data: []byte("enabled: true\n")}},
+		[]string{testTemplatePath},
+		true,
+		false,
+		&current,
+		stats,
+	)
+	wanted := Signal{
+		Check: checkThreatSurface,
+		Kind:  testThreatXSS,
+		Name:  "Template Engine",
+		Value: testThreatCWE,
+		Path:  testTemplatePath,
+	}
+	if !hasSignal(current.signals, wanted) {
+		t.Fatalf("threat signal was not added: %#v", current.signals)
+	}
+
+	detectors.runBrief(
+		fstest.MapFS{},
+		[]string{testTemplatePath},
+		true,
+		false,
+		&current,
+		stats,
+	)
+	if hasSignal(current.signals, wanted) {
+		t.Fatalf("removed threat signal remains: %#v", current.signals)
 	}
 }
 

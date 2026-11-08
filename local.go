@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -32,6 +33,7 @@ const (
 	checkSecret            = "Secret"
 	checkSecretsManagement = "Secrets-Management"
 	checkSecurityTool      = "Security-Tool"
+	checkThreatSurface     = "Threat-Surface"
 
 	detectorBrief           = "Brief"
 	detectorRepositoryFiles = "Repository-Files"
@@ -113,14 +115,16 @@ func newLocalDetectors(ctx context.Context, repo *githistory.Repo) (*localDetect
 
 func signalKnowledgeBase(source *kb.KnowledgeBase) *kb.KnowledgeBase {
 	filtered := &kb.KnowledgeBase{
-		ByName:        make(map[string]*kb.ToolDef),
-		ByCategory:    make(map[string][]*kb.ToolDef),
-		Ecosystems:    make(map[string][]*kb.ToolDef),
-		ManifestFiles: append([]string(nil), source.ManifestFiles...),
+		ByName:         make(map[string]*kb.ToolDef),
+		ByCategory:     make(map[string][]*kb.ToolDef),
+		Ecosystems:     make(map[string][]*kb.ToolDef),
+		ManifestFiles:  append([]string(nil), source.ManifestFiles...),
+		Threats:        source.Threats,
+		ThreatMappings: append([]kb.ThreatMapping(nil), source.ThreatMappings...),
 	}
 	for _, tool := range source.Tools {
 		_, _, _, selected := briefSignalType(tool.Tool.Name, tool.Tool.Category, taxonomyFromTool(tool))
-		if tool.Tool.Category != "language" && !selected {
+		if tool.Tool.Category != "language" && !selected && !briefThreatContributor(tool, source.ThreatMappings) {
 			continue
 		}
 		filtered.Tools = append(filtered.Tools, tool)
@@ -361,7 +365,8 @@ func (d *localDetectors) runBrief(
 }
 
 func (d *localDetectors) briefSignals(tree fs.FS) ([]Signal, []string, error) {
-	report, err := briefdetect.NewFS(d.knowledge, tree).Run()
+	engine := briefdetect.NewFS(d.knowledge, tree)
+	report, err := engine.Run()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -370,21 +375,104 @@ func (d *localDetectors) briefSignals(tree fs.FS) ([]Signal, []string, error) {
 		languages = append(languages, language.Name)
 	}
 	sort.Strings(languages)
-	return briefToolSignals(report.Tools), languages, nil
+	signals := append(briefToolSignals(report.Tools), briefThreatSignals(report, engine.ThreatModel(report))...)
+	sortSignals(signals)
+	return deduplicateSignals(signals), languages, nil
 }
 
 func (d *localDetectors) briefChangedSignals(
 	tree fs.FS,
 	changedPaths, languages []string,
 ) ([]Signal, []briefdetect.ToolRef, error) {
-	scan, err := briefdetect.NewFS(d.knowledge, tree).RunTools(briefdetect.ToolScanOptions{
+	engine := briefdetect.NewFS(d.knowledge, tree)
+	scan, err := engine.RunTools(briefdetect.ToolScanOptions{
 		ChangedFiles: changedPaths,
 		Languages:    languages,
 	})
 	if err != nil {
 		return nil, nil, err
 	}
-	return briefToolSignals(scan.Tools), scan.Checked, nil
+	report := &gitbrief.Report{Tools: scan.Tools}
+	signals := append(briefToolSignals(scan.Tools), briefThreatSignals(report, engine.ThreatModel(report))...)
+	sortSignals(signals)
+	return deduplicateSignals(signals), scan.Checked, nil
+}
+
+func briefThreatSignals(report *gitbrief.Report, threats *gitbrief.ThreatReport) []Signal {
+	paths := briefDetectionPaths(report)
+	var signals []Signal
+	for _, threat := range threats.Threats {
+		for _, tool := range threat.IntroducedBy {
+			toolPaths := paths[tool]
+			if len(toolPaths) == 0 {
+				signals = append(signals, Signal{
+					Check: checkThreatSurface,
+					Kind:  threat.ID,
+					Name:  tool,
+					Value: threat.CWE,
+				})
+				continue
+			}
+			for _, detectedPath := range toolPaths {
+				signals = append(signals, Signal{
+					Check: checkThreatSurface,
+					Kind:  threat.ID,
+					Name:  tool,
+					Value: threat.CWE,
+					Path:  detectedPath,
+				})
+			}
+		}
+	}
+	return signals
+}
+
+func briefDetectionPaths(report *gitbrief.Report) map[string][]string {
+	detections := append([]gitbrief.Detection(nil), report.Languages...)
+	detections = append(detections, report.PackageManagers...)
+	for _, tools := range report.Tools {
+		detections = append(detections, tools...)
+	}
+	paths := make(map[string][]string)
+	for _, detection := range detections {
+		paths[detection.Name] = append(paths[detection.Name], detection.ConfigFiles...)
+		if detection.Lockfile != "" {
+			paths[detection.Name] = append(paths[detection.Name], detection.Lockfile)
+		}
+	}
+	for name := range paths {
+		sort.Strings(paths[name])
+		paths[name] = slices.Compact(paths[name])
+	}
+	return paths
+}
+
+func briefThreatContributor(tool *kb.ToolDef, mappings []kb.ThreatMapping) bool {
+	if len(tool.Security.Threats) > 0 {
+		return true
+	}
+	tags := make(map[string]bool)
+	for _, tag := range tool.Taxonomy.Tags() {
+		tags[tag] = true
+	}
+	for _, mapping := range mappings {
+		if briefThreatMappingMatches(tags, mapping.Match) {
+			return true
+		}
+	}
+	return false
+}
+
+func briefThreatMappingMatches(tags map[string]bool, required []string) bool {
+	if len(required) == 0 {
+		return false
+	}
+	for _, tag := range required {
+		if !tags[tag] {
+			return false
+		}
+	}
+	return true
 }
 
 func briefToolSignals(tools map[string][]gitbrief.Detection) []Signal {
@@ -568,7 +656,7 @@ func containsString(values []string, target string) bool {
 func removeBriefSignals(signals map[string]Signal) {
 	for key, signal := range signals {
 		switch signal.Check {
-		case checkBuild, checkCI, checkPreCommit, checkSecretsManagement, checkSecurityTool:
+		case checkBuild, checkCI, checkPreCommit, checkSecretsManagement, checkSecurityTool, checkThreatSurface:
 			delete(signals, key)
 		}
 	}
@@ -576,7 +664,9 @@ func removeBriefSignals(signals map[string]Signal) {
 
 func (d *localDetectors) removeBriefToolSignals(signals map[string]Signal, checked []briefdetect.ToolRef) {
 	selected := make(map[string]bool, len(checked))
+	checkedNames := make(map[string]bool, len(checked))
 	for _, ref := range checked {
+		checkedNames[ref.Name] = true
 		tool := d.knowledge.ByName[ref.Name]
 		if tool == nil || tool.Tool.Category != ref.Category {
 			continue
@@ -587,6 +677,10 @@ func (d *localDetectors) removeBriefToolSignals(signals map[string]Signal, check
 		}
 	}
 	for key, signal := range signals {
+		if signal.Check == checkThreatSurface && checkedNames[signal.Name] {
+			delete(signals, key)
+			continue
+		}
 		if selected[briefSignalIdentity(signal.Check, signal.Kind, signal.Name)] {
 			delete(signals, key)
 		}
