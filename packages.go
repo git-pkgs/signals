@@ -10,22 +10,28 @@ import (
 	githistory "github.com/git-pkgs/history"
 	"github.com/git-pkgs/manifests"
 	"github.com/git-pkgs/roles"
+	"github.com/git-pkgs/spdx"
 	"github.com/git-pkgs/vers"
 )
 
 const (
-	dockerName                = "docker"
-	detectorPackages          = "Packages"
-	checkPackageFile          = "Package-File"
-	checkDependencyConstraint = "Dependency-Constraint"
-	checkDependencyPin        = "Dependency-Pin"
-	checkDependencyPinning    = "Dependency-Pinning"
-	checkLockfileIntegrity    = "Lockfile-Integrity"
-	checkPackageParse         = "Package-Parse"
-	checkPackageProvenance    = "Package-Provenance"
-	checkPinnedDependencies   = "Pinned-Dependencies"
-	packageProvenanceDisabled = "disabled"
-	packageProvenanceEnabled  = "enabled"
+	dockerName                  = "docker"
+	detectorPackages            = "Packages"
+	checkPackageFile            = "Package-File"
+	checkDependencyConstraint   = "Dependency-Constraint"
+	checkDependencyPin          = "Dependency-Pin"
+	checkDependencyPinning      = "Dependency-Pinning"
+	checkLockfileIntegrity      = "Lockfile-Integrity"
+	checkPackageParse           = "Package-Parse"
+	checkPackageProvenance      = "Package-Provenance"
+	checkPinnedDependencies     = "Pinned-Dependencies"
+	packageProvenanceDisabled   = "disabled"
+	packageProvenanceEnabled    = "enabled"
+	licenseExpressionInvalid    = "expression-invalid"
+	licenseExpressionKind       = "expression"
+	licenseExpressionStrict     = "strict"
+	licenseExpressionSyntax     = "syntax-only"
+	licenseExpressionNormalized = "normalized"
 )
 
 var packageChecks = map[string]bool{
@@ -183,6 +189,7 @@ func manifestLicenseSignals(path string, result *manifests.ParseResult) []Signal
 			Name:  license,
 			Path:  path,
 		})
+		signals = append(signals, manifestLicenseExpressionSignal(path, license))
 	}
 	if licenseFile := strings.TrimSpace(result.LicenseFile); licenseFile != "" {
 		signals = append(signals, Signal{
@@ -193,6 +200,42 @@ func manifestLicenseSignals(path string, result *manifests.ParseResult) []Signal
 		})
 	}
 	return signals
+}
+
+func manifestLicenseExpressionSignal(path, declaration string) Signal {
+	if expression, err := spdx.ParseStrict(declaration); err == nil {
+		return Signal{
+			Check: checkLicense,
+			Kind:  licenseExpressionKind,
+			Name:  expression.String(),
+			Value: licenseExpressionStrict,
+			Path:  path,
+		}
+	}
+	if expression, err := spdx.ParseSyntax(declaration); err == nil {
+		return Signal{
+			Check: checkLicense,
+			Kind:  licenseExpressionKind,
+			Name:  expression.String(),
+			Value: licenseExpressionSyntax,
+			Path:  path,
+		}
+	}
+	if expression, err := spdx.Parse(declaration); err == nil {
+		return Signal{
+			Check: checkLicense,
+			Kind:  licenseExpressionKind,
+			Name:  expression.String(),
+			Value: licenseExpressionNormalized,
+			Path:  path,
+		}
+	}
+	return Signal{
+		Check: checkLicense,
+		Kind:  licenseExpressionInvalid,
+		Name:  declaration,
+		Path:  path,
+	}
 }
 
 func manifestPinSignals(path string, result *manifests.ParseResult) []Signal {
@@ -396,10 +439,18 @@ func removePackageSignals(signals map[string]Signal, paths map[string]bool) {
 	for key, signal := range signals {
 		owned := packageChecks[signal.Check] ||
 			signal.Check == checkPackageProvenance && signal.Kind == packagingNameNPM ||
-			signal.Check == checkLicense &&
-				(signal.Kind == signalKindDeclaration || signal.Kind == signalKindFileReference)
+			signal.Check == checkLicense && manifestLicenseSignalKind(signal.Kind)
 		if owned && (paths == nil || paths[signal.Path]) {
 			delete(signals, key)
 		}
+	}
+}
+
+func manifestLicenseSignalKind(kind string) bool {
+	switch kind {
+	case signalKindDeclaration, signalKindFileReference, licenseExpressionKind, licenseExpressionInvalid:
+		return true
+	default:
+		return false
 	}
 }

@@ -119,7 +119,7 @@ Nine checks retain names used by Scorecard, but their evidence is detected by lo
 | Dangerous-Workflow | Script injection and untrusted checkout patterns parsed with Actionlint | None |
 | Dependency-Update-Tool | Dependabot, Renovate, and Scala Steward configuration | Dependabot-authored commit search |
 | Fuzzing | ClusterFuzzLite configuration and language-specific source patterns outside bundled or derived paths | OSS-Fuzz membership |
-| License | License and notice files classified by path, license expressions identified in their contents, and license values or file references declared by parsed manifests | Forge license classification |
+| License | License and notice files classified by path, license expressions identified in their contents, and license values or file references declared by parsed manifests; manifest declarations are validated as strict, syntax-only, normalized, or invalid SPDX expressions | Forge license classification |
 | SAST | Known Actions, Sonar configuration, and Qodana configuration | Successful check runs |
 | SBOM | SPDX and CycloneDX documents detected from content, plus named candidates that cannot be parsed | Release assets |
 | Security-Policy | Accepted policy paths with extracted email addresses and links | Inherited policy from the organization `.github` repository |
@@ -173,6 +173,7 @@ The local detectors share parsers and changed-path caches across related signals
 - [`github.com/git-pkgs/manifests`](https://github.com/git-pkgs/manifests) parses package metadata, declared licenses, Actions, Docker, NuGet, and other dependency files.
 - [`github.com/git-pkgs/managers`](https://github.com/git-pkgs/managers) identifies package managers and their manifest or lockfile evidence from commit trees.
 - [`github.com/git-pkgs/sbom`](https://github.com/git-pkgs/sbom) identifies and parses SPDX and CycloneDX JSON documents.
+- [`github.com/git-pkgs/spdx`](https://github.com/git-pkgs/spdx) validates and normalizes SPDX expressions declared by package manifests.
 - [`github.com/git-pkgs/brief`](https://github.com/git-pkgs/brief) detects CI systems, build tools, security tools, and pre-commit runners from an `fs.FS` commit tree.
 - [`github.com/git-pkgs/languages`](https://github.com/git-pkgs/languages) detects source languages from paths and blob content.
 - [`github.com/git-pkgs/reuse`](https://github.com/git-pkgs/reuse) resolves SPDX headers, sidecars, REUSE.toml annotations, and DEP5 metadata from an `fs.FS` commit tree.

@@ -46,9 +46,38 @@ license-file = "COPYING"
 `))
 
 	findPackageSignal(t, signals, checkLicense, signalKindDeclaration, "MIT OR Apache-2.0")
+	expression := findPackageSignal(t, signals, checkLicense, licenseExpressionKind, "MIT OR Apache-2.0")
+	if expression.Value != licenseExpressionStrict {
+		t.Errorf("license expression status = %q, want %q", expression.Value, licenseExpressionStrict)
+	}
 	reference := findPackageSignal(t, signals, checkLicense, signalKindFileReference, "")
 	if reference.Value != "COPYING" {
 		t.Errorf("license file reference = %q, want COPYING", reference.Value)
+	}
+}
+
+func TestManifestLicenseExpressionSignalsClassifyDeclarations(t *testing.T) {
+	tests := []struct {
+		name        string
+		declaration string
+		kind        string
+		expression  string
+		status      string
+	}{
+		{name: "strict", declaration: "MIT OR Apache-2.0", kind: licenseExpressionKind, expression: "MIT OR Apache-2.0", status: licenseExpressionStrict},
+		{name: "future identifier", declaration: "Future-License-1.0 OR MIT", kind: licenseExpressionKind, expression: "Future-License-1.0 OR MIT", status: licenseExpressionSyntax},
+		{name: "informal", declaration: "Apache 2", kind: licenseExpressionKind, expression: "Apache-2.0", status: licenseExpressionNormalized},
+		{name: "invalid", declaration: "SEE LICENSE IN COPYING", kind: licenseExpressionInvalid, expression: "SEE LICENSE IN COPYING"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			signal := manifestLicenseExpressionSignal("package.json", test.declaration)
+			if signal.Check != checkLicense || signal.Kind != test.kind || signal.Name != test.expression ||
+				signal.Value != test.status || signal.Path != "package.json" {
+				t.Fatalf("manifestLicenseExpressionSignal() = %#v", signal)
+			}
+		})
 	}
 }
 
@@ -127,6 +156,7 @@ func TestPackageAndRepositoryLicenseSignalsHaveSeparateOwnership(t *testing.T) {
 	signals := map[string]Signal{}
 	for _, signal := range []Signal{
 		{Check: checkLicense, Kind: signalKindDeclaration, Name: testMITLicenseID, Path: packageJSONPath},
+		{Check: checkLicense, Kind: licenseExpressionKind, Name: testMITLicenseID, Value: licenseExpressionStrict, Path: packageJSONPath},
 		{Check: checkLicense, Kind: signalKindLicense, Name: testMITLicenseID, Path: testLicensePath},
 		{Check: checkLicense, Kind: signalKindNotice, Path: "NOTICE"},
 	} {
