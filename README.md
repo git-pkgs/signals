@@ -132,7 +132,7 @@ The additional detectors use the same persistent signal model. A threat-surface 
 | Check | Local evidence |
 | --- | --- |
 | Artifact-Provenance | GitHub artifact-attestation actions and SLSA generator reusable workflows, including the workflow path; configuration does not show that a run completed or its claims were verified |
-| Agent-Skill | Skill metadata, instruction digests, allowed tools, and script digests with file modes; instruction text is not retained in output |
+| Agent-Skill | Skill metadata, instruction digests, allowed tools, and script digests with file modes; scripts over 4 MB record size and mode without a content digest, and instruction text is not retained in output |
 | CI | CI configuration detected by the Brief knowledge base, including GitHub Actions, GitLab CI, Azure Pipelines, CircleCI, Jenkins, Buildkite, Drone, and Travis CI |
 | Build | Tools classified as build tools by Brief, including Make, CMake, Meson, Bazel, Buck, and language-specific build tools |
 | Certificate | Certificate identities, fixed validity dates, CA status, trust-store collection digests, matches against embedded reference catalogs, and incomplete or oversized scan coverage |
