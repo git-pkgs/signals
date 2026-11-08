@@ -116,20 +116,22 @@ type repositoryFileCacheKey struct {
 }
 
 type repositoryPathRules struct {
-	changelog *kb.ResourceInfo
-	policy    *kb.ResourceInfo
-	sbom      *kb.ResourceInfo
-	qodana    *kb.ToolDef
-	sonar     *kb.ToolDef
+	changelog         *kb.ResourceInfo
+	policy            *kb.ResourceInfo
+	sbom              *kb.ResourceInfo
+	qodana            *kb.ToolDef
+	sonar             *kb.ToolDef
+	securityDocuments *securityDocumentRules
 }
 
 func newRepositoryPathRules(knowledge *kb.KnowledgeBase) *repositoryPathRules {
 	return &repositoryPathRules{
-		changelog: knowledge.Resource("", "changelog"),
-		policy:    knowledge.Resource("security", "policy"),
-		sbom:      knowledge.Resource("metadata", "sbom"),
-		qodana:    knowledge.ByName["Qodana"],
-		sonar:     knowledge.ByName["SonarQube"],
+		changelog:         knowledge.Resource("", "changelog"),
+		policy:            knowledge.Resource("security", "policy"),
+		sbom:              knowledge.Resource("metadata", "sbom"),
+		qodana:            knowledge.ByName["Qodana"],
+		sonar:             knowledge.ByName["SonarQube"],
+		securityDocuments: newSecurityDocumentRules(knowledge),
 	}
 }
 
@@ -225,6 +227,7 @@ func repositoryFileSignalsFromFS(
 	if signal, ok := binaryArtifactSignal(filePath, prefix, true); ok {
 		signals = append(signals, signal)
 	}
+	signals = append(signals, rules.securityDocumentSignals(filePath)...)
 
 	certificates, err := repositoryCertificateSignals(ctx, tree, filePath, prefix, size)
 	if err != nil {
@@ -903,6 +906,13 @@ func (rules *repositoryPathRules) changelogPath(filePath string) bool {
 		rules != nil && rules.changelog != nil && rules.changelog.MatchesPath(filePath)
 }
 
+func (rules *repositoryPathRules) securityDocumentSignals(filePath string) []Signal {
+	if rules == nil || rules.securityDocuments == nil {
+		return nil
+	}
+	return rules.securityDocuments.signals(filePath)
+}
+
 func repositoryChangelogSignals(tree fs.FS, filePath string, rules *repositoryPathRules) ([]Signal, error) {
 	if !rules.changelogPath(filePath) {
 		return nil, nil
@@ -1132,7 +1142,7 @@ func (d *localDetectors) runRepositoryFiles(
 	delete(current.errors, detectorRepositoryFiles)
 	checks := []string{
 		checkBinaryArtifacts, checkCertificate, checkFuzzing, checkLicense, checkSARIF, checkSAST, checkSBOM,
-		checkSecurityChangelog, checkSecurityPolicy,
+		checkSecurityChangelog, checkSecurityDocumentation, checkSecurityPolicy,
 	}
 	if forceFull {
 		for _, check := range checks {

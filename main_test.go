@@ -174,6 +174,58 @@ jobs:
 	}
 }
 
+func TestLogTracksSecurityDocumentation(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.name", "Signals Test")
+	gitRun(t, repo, "config", "user.email", "signals@example.com")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+
+	writeFile(t, repo, "README.md", "# example\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Initial commit")
+
+	writeFile(t, repo, "docs/design/THREAT_MODEL.md", "# Threat model\n")
+	writeFile(t, repo, "SECURITY-AUDIT.md", "# Security audit\n")
+	writeFile(t, repo, ".github/DISCLOSURE.adoc", "= Disclosure\n")
+	writeFile(t, repo, "src/repository_threat_model.go", "package example\n")
+	writeFile(t, repo, "src/security-reviewer.go", "package example\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Add security documentation")
+
+	if err := os.Remove(filepath.Join(repo, "SECURITY-AUDIT.md")); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "add", "-u")
+	gitRun(t, repo, "commit", "-m", "Remove audit")
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"log", testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
+		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
+	}
+	for _, expected := range []string{
+		"+ Security-Documentation/threat-model at docs/design/THREAT_MODEL.md",
+		"+ Security-Documentation/audit at SECURITY-AUDIT.md",
+		"+ Security-Documentation/disclosure at .github/DISCLOSURE.adoc",
+		"- Security-Documentation/audit at SECURITY-AUDIT.md",
+	} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Errorf("output missing %q:\n%s", expected, stdout.String())
+		}
+	}
+	for _, unexpected := range []string{
+		"Security-Documentation/threat-model at src/repository_threat_model.go",
+		"Security-Documentation/audit at src/security-reviewer.go",
+	} {
+		if strings.Contains(stdout.String(), unexpected) {
+			t.Errorf("output contains %q:\n%s", unexpected, stdout.String())
+		}
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected detection errors:\n%s", stderr.String())
+	}
+}
+
 func TestLogUsesBriefSecurityPathDefinitions(t *testing.T) {
 	repo := t.TempDir()
 	gitRun(t, repo, "init", "-b", "main")
