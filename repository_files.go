@@ -18,6 +18,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/git-pkgs/brief/kb"
 	gitcerts "github.com/git-pkgs/certs"
 	"github.com/git-pkgs/cwe"
 	githistory "github.com/git-pkgs/history"
@@ -40,11 +41,6 @@ var binaryArtifactExtensions = map[string]bool{
 	".efi": true, ".exe": true, ".iso": true, ".jar": true, ".lib": true,
 	".msi": true, ".o": true, ".ocx": true, ".par": true, ".pyc": true,
 	".pyo": true, ".rpm": true, ".so": true, ".wasm": true, ".whl": true,
-}
-
-var sbomFileSuffixes = []string{
-	".cdx.json", ".cdx.xml", ".spdx", ".spdx.json", ".spdx.xml",
-	".spdx.yml", ".spdx.yaml", ".spdx.rdf", ".spdx.rdf.xml",
 }
 
 type fuzzPattern struct {
@@ -119,11 +115,28 @@ type repositoryFileCacheKey struct {
 	path string
 }
 
+type repositoryPathRules struct {
+	policy *kb.ResourceInfo
+	sbom   *kb.ResourceInfo
+	qodana *kb.ToolDef
+	sonar  *kb.ToolDef
+}
+
+func newRepositoryPathRules(knowledge *kb.KnowledgeBase) *repositoryPathRules {
+	return &repositoryPathRules{
+		policy: knowledge.Resource("security", "policy"),
+		sbom:   knowledge.Resource("metadata", "sbom"),
+		qodana: knowledge.ByName["Qodana"],
+		sonar:  knowledge.ByName["SonarQube"],
+	}
+}
+
 func repositoryFileSignalsForChanges(
 	ctx context.Context,
 	tree fs.FS,
 	changes []githistory.Change,
 	cache map[repositoryFileCacheKey][]Signal,
+	rules *repositoryPathRules,
 ) ([]Signal, []string, error) {
 	var signals []Signal
 	paths := make([]string, 0, len(changes))
@@ -148,7 +161,7 @@ func repositoryFileSignalsForChanges(
 			continue
 		}
 
-		parsed, err := repositoryFileSignalsFromFS(ctx, tree, filePath, info.Size())
+		parsed, err := repositoryFileSignalsFromFS(ctx, tree, filePath, info.Size(), rules)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
@@ -164,7 +177,11 @@ func repositoryFileSignalsForChanges(
 	return deduplicateSignals(signals), paths, nil
 }
 
-func allRepositoryFileSignals(ctx context.Context, tree fs.FS) ([]Signal, error) {
+func allRepositoryFileSignals(
+	ctx context.Context,
+	tree fs.FS,
+	rules *repositoryPathRules,
+) ([]Signal, error) {
 	var signals []Signal
 	err := fs.WalkDir(tree, ".", func(filePath string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -177,7 +194,7 @@ func allRepositoryFileSignals(ctx context.Context, tree fs.FS) ([]Signal, error)
 		if err != nil {
 			return err
 		}
-		parsed, err := repositoryFileSignalsFromFS(ctx, tree, filePath, info.Size())
+		parsed, err := repositoryFileSignalsFromFS(ctx, tree, filePath, info.Size(), rules)
 		if err != nil {
 			return fmt.Errorf("read repository file %s: %w", filePath, err)
 		}
@@ -196,6 +213,7 @@ func repositoryFileSignalsFromFS(
 	tree fs.FS,
 	filePath string,
 	size int64,
+	rules *repositoryPathRules,
 ) ([]Signal, error) {
 	prefix, err := readRepositoryFile(tree, filePath, repositoryFilePrefixBytes)
 	if err != nil {
@@ -232,13 +250,13 @@ func repositoryFileSignalsFromFS(
 		})
 	}
 
-	structured, err := repositoryStructuredSignals(tree, filePath)
+	structured, err := repositoryStructuredSignals(tree, filePath, rules)
 	if err != nil {
 		return nil, err
 	}
 	signals = append(signals, structured...)
 
-	if securityPolicyPath(filePath) {
+	if rules.securityPolicyPath(filePath) {
 		parsed, err := scanRepositoryFile(tree, filePath, func(reader io.Reader) ([]Signal, error) {
 			return securityPolicySignals(filePath, reader)
 		})
@@ -258,31 +276,35 @@ func repositoryFileSignalsFromFS(
 		signals = append(signals, parsed...)
 	}
 
-	if sastConfigPath(filePath) {
+	if rules.sastConfigPath(filePath) {
 		if strings.EqualFold(path.Base(filePath), "pom.xml") {
 			data, err := readRepositoryFile(tree, filePath, repositoryFileContentBytes)
 			if err != nil {
 				return nil, err
 			}
-			signals = append(signals, sastConfigSignals(filePath, data)...)
+			signals = append(signals, rules.sastConfigSignals(filePath, data)...)
 		} else {
-			signals = append(signals, sastConfigSignals(filePath, nil)...)
+			signals = append(signals, rules.sastConfigSignals(filePath, nil)...)
 		}
 	}
 	return signals, nil
 }
 
-func repositoryStructuredSignals(tree fs.FS, filePath string) ([]Signal, error) {
+func repositoryStructuredSignals(
+	tree fs.FS,
+	filePath string,
+	rules *repositoryPathRules,
+) ([]Signal, error) {
 	if sarifFilePath(filePath) {
 		return scanRepositoryFile(tree, filePath, func(reader io.Reader) ([]Signal, error) {
 			return sarifSignals(filePath, reader)
 		})
 	}
-	if !sbomContentPath(filePath) {
+	if !rules.sbomContentPath(filePath) {
 		return nil, nil
 	}
 	return scanRepositoryFile(tree, filePath, func(reader io.Reader) ([]Signal, error) {
-		signal, ok, err := sbomSignal(filePath, reader)
+		signal, ok, err := sbomSignal(filePath, rules.sbomFileName(filePath), reader)
 		if !ok {
 			return nil, err
 		}
@@ -322,8 +344,11 @@ func scanRepositoryFileError(tree fs.FS, filePath string, scan func(io.Reader) e
 	return errors.Join(scan(file), file.Close())
 }
 
-func sbomContentPath(filePath string) bool {
-	if sbomFileName(filePath) {
+func (rules *repositoryPathRules) sbomContentPath(filePath string) bool {
+	if !repositoryProjectEvidencePath(filePath) {
+		return false
+	}
+	if rules.sbomFileName(filePath) {
 		return true
 	}
 	switch strings.ToLower(path.Ext(filePath)) {
@@ -334,13 +359,19 @@ func sbomContentPath(filePath string) bool {
 	}
 }
 
-func sastConfigPath(filePath string) bool {
-	switch strings.ToLower(path.Base(filePath)) {
-	case "pom.xml", "sonar-project.properties", "qodana.yaml", "qodana.yml":
-		return true
-	default:
-		return false
-	}
+func (rules *repositoryPathRules) sastConfigPath(filePath string) bool {
+	return repositoryProjectEvidencePath(filePath) &&
+		(strings.EqualFold(path.Base(filePath), "pom.xml") ||
+			toolMatchesPath(rules.sonar, filePath) || toolMatchesPath(rules.qodana, filePath))
+}
+
+func repositoryProjectEvidencePath(filePath string) bool {
+	labels, err := roles.Match(filePath)
+	return err != nil || !labels.BundledOrDerived()
+}
+
+func toolMatchesPath(tool *kb.ToolDef, filePath string) bool {
+	return tool != nil && tool.MatchesPath(filePath)
 }
 
 func binaryArtifactSignal(filePath string, data []byte, prefix bool) (Signal, bool) {
@@ -633,10 +664,10 @@ var repositoryLicenseMatcher = sync.OnceValues(func() (*gitlicenses.Matcher, err
 	return gitlicenses.New()
 })
 
-func sbomSignal(filePath string, reader io.Reader) (Signal, bool, error) {
+func sbomSignal(filePath string, named bool, reader io.Reader) (Signal, bool, error) {
 	metadata, err := sbom.Inspect(reader)
 	if errors.Is(err, sbom.ErrUnrecognized) {
-		if !sbomFileName(filePath) {
+		if !named {
 			return Signal{}, false, nil
 		}
 		return Signal{
@@ -660,17 +691,8 @@ func sbomSignal(filePath string, reader io.Reader) (Signal, bool, error) {
 	}, true, nil
 }
 
-func sbomFileName(filePath string) bool {
-	lower := strings.ToLower(path.Base(filePath))
-	if lower == "bom.json" || lower == "bom.xml" {
-		return true
-	}
-	for _, suffix := range sbomFileSuffixes {
-		if strings.HasSuffix(lower, suffix) {
-			return true
-		}
-	}
-	return false
+func (rules *repositoryPathRules) sbomFileName(filePath string) bool {
+	return rules != nil && rules.sbom != nil && rules.sbom.MatchesPath(filePath)
 }
 
 func sarifFilePath(filePath string) bool {
@@ -863,16 +885,9 @@ func appendSARIFCounts(signals []Signal, filePath, kind string, counts map[strin
 	return signals
 }
 
-func securityPolicyPath(filePath string) bool {
-	switch strings.ToLower(filePath) {
-	case "security.md", ".github/security.md", "docs/security.md",
-		"security.markdown", ".github/security.markdown", "docs/security.markdown",
-		"security.adoc", ".github/security.adoc", "docs/security.adoc",
-		"security.rst", ".github/security.rst", "doc/security.rst", "docs/security.rst":
-		return true
-	default:
-		return false
-	}
+func (rules *repositoryPathRules) securityPolicyPath(filePath string) bool {
+	return repositoryProjectEvidencePath(filePath) &&
+		rules != nil && rules.policy != nil && rules.policy.MatchesPath(filePath)
 }
 
 func securityPolicySignals(filePath string, reader io.Reader) ([]Signal, error) {
@@ -1028,14 +1043,13 @@ func fuzzingSignalsInWindow(
 	return signals
 }
 
-func sastConfigSignals(filePath string, data []byte) []Signal {
-	base := strings.ToLower(path.Base(filePath))
-	switch base {
-	case "sonar-project.properties":
+func (rules *repositoryPathRules) sastConfigSignals(filePath string, data []byte) []Signal {
+	switch {
+	case toolMatchesPath(rules.sonar, filePath):
 		return []Signal{{Check: checkSAST, Kind: signalKindTool, Name: sastToolSonar, Path: filePath, Line: 1}}
-	case "qodana.yaml", "qodana.yml":
+	case toolMatchesPath(rules.qodana, filePath):
 		return []Signal{{Check: checkSAST, Kind: signalKindTool, Name: "Qodana", Path: filePath, Line: 1}}
-	case "pom.xml":
+	case strings.EqualFold(path.Base(filePath), "pom.xml"):
 		match := sonarPOMPattern.FindSubmatchIndex(data)
 		if len(match) == 0 {
 			return nil
@@ -1077,13 +1091,14 @@ func (d *localDetectors) runRepositoryFiles(
 	var paths []string
 	var err error
 	if forceFull {
-		signals, err = allRepositoryFileSignals(ctx, tree)
+		signals, err = allRepositoryFileSignals(ctx, tree, d.repositoryPaths)
 	} else {
 		signals, paths, err = repositoryFileSignalsForChanges(
 			ctx,
 			tree,
 			changes,
 			d.repositoryFileCache,
+			d.repositoryPaths,
 		)
 	}
 	detectorStats.duration += time.Since(started)

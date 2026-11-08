@@ -74,6 +74,7 @@ type localDetectors struct {
 	repositoryFileCache map[repositoryFileCacheKey][]Signal
 	workflowCache       map[workflowCacheKey][]Signal
 	packageManagers     *packageManagerDetector
+	repositoryPaths     *repositoryPathRules
 	reuseMarkers        map[plumbing.Hash]bool
 }
 
@@ -101,6 +102,7 @@ func newLocalDetectors(ctx context.Context, repo *githistory.Repo) (*localDetect
 	if err != nil {
 		return nil, fmt.Errorf("create secret scanner: %w", err)
 	}
+	repositoryPaths := newRepositoryPathRules(knowledge)
 	knowledge = signalKnowledgeBase(knowledge)
 	detectors := &localDetectors{
 		repo:                repo,
@@ -111,6 +113,7 @@ func newLocalDetectors(ctx context.Context, repo *githistory.Repo) (*localDetect
 		repositoryFileCache: make(map[repositoryFileCacheKey][]Signal),
 		workflowCache:       make(map[workflowCacheKey][]Signal),
 		packageManagers:     packageManagers,
+		repositoryPaths:     repositoryPaths,
 		reuseMarkers:        make(map[plumbing.Hash]bool),
 	}
 	detectors.briefImpact = newBriefImpactReport(knowledge)

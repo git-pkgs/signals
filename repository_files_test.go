@@ -20,6 +20,8 @@ import (
 	"testing/fstest"
 	"time"
 
+	gitbrief "github.com/git-pkgs/brief"
+	"github.com/git-pkgs/brief/kb"
 	githistory "github.com/git-pkgs/history"
 )
 
@@ -142,6 +144,32 @@ func TestRepositoryFileSignalsUsesGitPkgsParsers(t *testing.T) {
 		if !containsExactSignal(policySignals, wanted) {
 			t.Errorf("signal missing: %#v\ngot: %#v", wanted, policySignals)
 		}
+	}
+	gitLabPolicy := repositorySignals(t, ".gitlab/SECURITY.txt", []byte("Email security@example.com.\n"))
+	if !containsExactSignal(gitLabPolicy, Signal{
+		Check: checkSecurityPolicy,
+		Kind:  "policy",
+		Path:  ".gitlab/SECURITY.txt",
+		Line:  1,
+	}) {
+		t.Fatalf("GitLab policy signals = %#v", gitLabPolicy)
+	}
+}
+
+func TestSecurityPolicyPathsFromBriefPreserveExistingPaths(t *testing.T) {
+	rules := testRepositoryPathRules(t)
+	for _, filePath := range []string{
+		"security.md", ".github/security.md", "docs/security.md",
+		"security.markdown", ".github/security.markdown", "docs/security.markdown",
+		"security.adoc", ".github/security.adoc", "docs/security.adoc",
+		"security.rst", ".github/security.rst", "doc/security.rst", "docs/security.rst",
+	} {
+		if !rules.securityPolicyPath(filePath) {
+			t.Errorf("security policy path %q did not match", filePath)
+		}
+	}
+	if rules.securityPolicyPath("packages/api/security.md") {
+		t.Fatal("unconfigured security policy directory matched")
 	}
 }
 
@@ -282,12 +310,13 @@ func TestRepositoryFileSignalsReportsIncompleteCertificateScan(t *testing.T) {
 }
 
 func TestRepositoryFileSignalsReportsUnrecognizedSBOMCandidate(t *testing.T) {
-	signals := repositorySignals(t, "bom.cdx.json", []byte(`{"name":"not an sbom"}`))
+	const sbomPath = "artifacts/service.SPDX.JSON"
+	signals := repositorySignals(t, sbomPath, []byte(`{"name":"not an sbom"}`))
 	wanted := Signal{
 		Check: checkSBOM,
 		Kind:  "candidate",
-		Name:  "bom.cdx.json",
-		Path:  "bom.cdx.json",
+		Name:  "service.SPDX.JSON",
+		Path:  sbomPath,
 		Line:  1,
 	}
 	if !containsExactSignal(signals, wanted) {
@@ -337,6 +366,21 @@ func TestRepositoryFileSignalsReportsTruncatedSARIF(t *testing.T) {
 	} {
 		if !containsExactSignal(signals, wanted) {
 			t.Errorf("signal missing: %#v\ngot: %#v", wanted, signals)
+		}
+	}
+}
+
+func TestRepositoryFileSignalsIgnoreBundledSecurityEvidence(t *testing.T) {
+	for _, test := range []struct {
+		path string
+		data string
+	}{
+		{path: "fixtures/bom.json", data: `{"bomFormat":"CycloneDX","specVersion":"1.6","version":1}`},
+		{path: "testdata/qodana.yaml", data: "version: 1.0\n"},
+		{path: "vendor/example/.sonarcloud.properties", data: "sonar.projectKey=example\n"},
+	} {
+		if signals := repositorySignals(t, test.path, []byte(test.data)); len(signals) != 0 {
+			t.Errorf("%s signals = %#v", test.path, signals)
 		}
 	}
 }
@@ -410,6 +454,28 @@ func TestRepositoryFileSignalsDetectsFuzzersAndSASTConfig(t *testing.T) {
 				Line:  2,
 			},
 		},
+		{
+			path: "services/api/qodana.yaml",
+			data: "version: 1.0\n",
+			want: Signal{
+				Check: checkSAST,
+				Kind:  signalKindTool,
+				Name:  "Qodana",
+				Path:  "services/api/qodana.yaml",
+				Line:  1,
+			},
+		},
+		{
+			path: "services/web/.sonarcloud.properties",
+			data: "sonar.projectKey=web\n",
+			want: Signal{
+				Check: checkSAST,
+				Kind:  signalKindTool,
+				Name:  sastToolSonar,
+				Path:  "services/web/.sonarcloud.properties",
+				Line:  1,
+			},
+		},
 	}
 	for _, test := range tests {
 		if signals := repositorySignals(t, test.path, []byte(test.data)); !containsExactSignal(signals, test.want) {
@@ -430,7 +496,9 @@ func TestRepositoryFileSignalsForChangesUsesBlobCache(t *testing.T) {
 	changes := []githistory.Change{{Path: testLicensePath, NewOID: "1234"}}
 	tree := fstest.MapFS{testLicensePath: {Data: []byte(mitLicenseText)}}
 
-	first, paths, err := repositoryFileSignalsForChanges(t.Context(), tree, changes, cache)
+	first, paths, err := repositoryFileSignalsForChanges(
+		t.Context(), tree, changes, cache, testRepositoryPathRules(t),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -438,7 +506,9 @@ func TestRepositoryFileSignalsForChangesUsesBlobCache(t *testing.T) {
 		t.Fatalf("signals = %#v, paths = %#v", first, paths)
 	}
 
-	second, _, err := repositoryFileSignalsForChanges(t.Context(), fstest.MapFS{}, changes, cache)
+	second, _, err := repositoryFileSignalsForChanges(
+		t.Context(), fstest.MapFS{}, changes, cache, testRepositoryPathRules(t),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -456,6 +526,7 @@ func TestRepositoryFileSignalsForChangesSkipsDirectories(t *testing.T) {
 		tree,
 		changes,
 		make(map[repositoryFileCacheKey][]Signal),
+		testRepositoryPathRules(t),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -666,11 +737,21 @@ func repositorySignals(t *testing.T, filePath string, data []byte) []Signal {
 		fstest.MapFS{filePath: {Data: data}},
 		filePath,
 		int64(len(data)),
+		testRepositoryPathRules(t),
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return signals
+}
+
+func testRepositoryPathRules(t *testing.T) *repositoryPathRules {
+	t.Helper()
+	knowledge, err := kb.Load(gitbrief.KnowledgeFS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return newRepositoryPathRules(knowledge)
 }
 
 func containsExactSignal(signals []Signal, wanted Signal) bool {
