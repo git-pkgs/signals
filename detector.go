@@ -14,6 +14,7 @@ const (
 	checkDependencyUpdateTool = "Dependency-Update-Tool"
 	checkFuzzing              = "Fuzzing"
 	checkLicense              = "License"
+	checkSARIF                = "SARIF"
 	checkSAST                 = "SAST"
 	checkSBOM                 = "SBOM"
 	checkSecurityPolicy       = "Security-Policy"
