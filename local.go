@@ -38,6 +38,7 @@ const (
 	detectorBrief           = "Brief"
 	detectorAgentSkills     = "Agent-Skills"
 	detectorRepositoryFiles = "Repository-Files"
+	detectorSensitiveIgnore = "Sensitive-Ignores"
 	detectorWorkflows       = "Workflows"
 
 	maxSecretBlobSize   = 1 << 20
@@ -51,6 +52,7 @@ var localDetectorNames = []string{
 	detectorPackages,
 	detectorPackageManagers,
 	detectorRepositoryFiles,
+	detectorSensitiveIgnore,
 	detectorWorkflows,
 	checkSecret,
 	checkREUSE,
@@ -165,6 +167,8 @@ func (d *localDetectors) detect(
 	packageRun := packageFull || packagesAffected(changes)
 	repositoryFileFull := forceFull || parent.errors[detectorRepositoryFiles] != ""
 	repositoryFileRun := repositoryFileFull || len(changes) > 0
+	sensitiveIgnoreFull := forceFull || parent.errors[detectorSensitiveIgnore] != ""
+	sensitiveIgnoreRun := sensitiveIgnoreFull || sensitiveIgnoresAffected(changes)
 	workflowAffected := workflowsAffected(changes)
 	workflowError := parent.errors[detectorWorkflows]
 	workflowFull := forceFull || workflowError != "" &&
@@ -185,7 +189,7 @@ func (d *localDetectors) detect(
 	reuseRun := reuseFull || parent.reuseActive && len(changes) > 0
 
 	var tree fs.FS
-	if anyDetectorRuns(agentSkillRun, briefRun, dependencyUpdateRun, packageRun, repositoryFileRun, workflowRun, managerRun, reuseRun) {
+	if anyDetectorRuns(agentSkillRun, briefRun, dependencyUpdateRun, packageRun, repositoryFileRun, sensitiveIgnoreRun, workflowRun, managerRun, reuseRun) {
 		var err error
 		tree, err = d.repo.TreeFS(commit.Hash)
 		if err != nil {
@@ -198,6 +202,7 @@ func (d *localDetectors) detect(
 	d.runDependencyUpdateConfigs(tree, dependencyUpdateRun, dependencyUpdateFull, &current, stats)
 	d.runPackages(tree, changes, packageRun, packageFull, &current, stats)
 	d.runRepositoryFiles(ctx, tree, changes, repositoryFileRun, repositoryFileFull, &current, stats)
+	d.runSensitiveIgnores(tree, sensitiveIgnoreRun, &current, stats)
 	d.runWorkflows(tree, changes, workflowRun, workflowFull, &current, stats)
 	d.runPackageManagers(
 		tree,
@@ -234,6 +239,30 @@ func (d *localDetectors) runAgentSkills(
 	}
 	delete(current.errors, detectorAgentSkills)
 	removeCheckSignals(current.signals, checkAgentSkill)
+	addSignals(current.signals, signals)
+}
+
+func (d *localDetectors) runSensitiveIgnores(
+	tree fs.FS,
+	run bool,
+	current *commitState,
+	stats *scanStats,
+) {
+	detectorStats := stats.detectors[detectorSensitiveIgnore]
+	if !run {
+		detectorStats.skipped++
+		return
+	}
+	recordDetectorRun(detectorStats, true)
+	started := time.Now()
+	signals, err := sensitiveIgnoreSignals(tree)
+	detectorStats.duration += time.Since(started)
+	if err != nil {
+		current.errors[detectorSensitiveIgnore] = err.Error()
+		return
+	}
+	delete(current.errors, detectorSensitiveIgnore)
+	removeCheckSignals(current.signals, checkSensitiveIgnore)
 	addSignals(current.signals, signals)
 }
 

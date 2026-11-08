@@ -42,6 +42,8 @@ github.com/git-pkgs/citation v0.1.0 h1:0toQBjxVOtaUsxRtcDJL9uZ6SYFb6IgbHgKpTpP0c
 github.com/git-pkgs/citation v0.1.0/go.mod h1:4vrS78/jjHeusS+eozjP/d3pX2NogEi1R/7gLVqkgqs=
 github.com/git-pkgs/codemeta v0.3.0 h1:zkWndmquCv2tPIHCHb+JXx3eKjmxRoD48f4/3sNAlGw=
 github.com/git-pkgs/codemeta v0.3.0/go.mod h1:R1vGXVohTa22vVKaV3/8xVs3+tcgvqc4ziaMikdXc/I=
+github.com/git-pkgs/gitignore v1.3.1-0.20261108194038-d09d5ccc19b9 h1:+1HyWVLjMCi4Xoq9Gh1oq2tmbNn1Aa52tShtuPGddOo=
+github.com/git-pkgs/gitignore v1.3.1-0.20261108194038-d09d5ccc19b9/go.mod h1:zleLGZ4PhQrUXrJSsVQWKoeEllEjJH49+DjyKpzIFPM=
 github.com/git-pkgs/history v0.2.0 h1:UCbrp/PX6rfLukUCRnYme8PtyCqKO8Q5wrpDUY0SOTE=
 github.com/git-pkgs/history v0.2.0/go.mod h1:DaoJasfycHYLtwr8ZTDp7PDnU8WMjAqmadHgJDqAO4A=
 github.com/git-pkgs/languages v0.1.0 h1:Y7bwb86k9DgagCJn3bXW6+8lOtwayDD17Np2usEPooY=
