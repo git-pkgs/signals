@@ -536,7 +536,7 @@ func certificateLocation(location []gitcerts.Member) string {
 		}
 		parts = append(parts, part)
 	}
-	return strings.Join(parts, "!")
+	return certificateName(strings.Join(parts, "!"))
 }
 
 func legalFileKinds(filePath string) (license, notice bool) {

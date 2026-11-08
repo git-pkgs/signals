@@ -188,7 +188,22 @@ func TestLogEscapesCertificateControlCharacters(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repo, "trust.pem"), pemData, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	gitRun(t, repo, "add", "trust.pem")
+	var archive bytes.Buffer
+	writer := zip.NewWriter(&archive)
+	member, err := writer.Create("roots\n- forged/trust.pem")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := member.Write(pemData); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "package.jar"), archive.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "add", "trust.pem", "package.jar")
 	gitRun(t, repo, "commit", "-m", "Add trust certificate")
 
 	var stdout, stderr bytes.Buffer
@@ -201,6 +216,9 @@ func TestLogEscapesCertificateControlCharacters(t *testing.T) {
 	}
 	if !strings.Contains(output, `subject="CN=Signals Test\n- forged"`) {
 		t.Fatalf("escaped certificate identity missing:\n%s", output)
+	}
+	if !strings.Contains(output, `location="package.jar!roots\n- forged/trust.pem#1"`) {
+		t.Fatalf("escaped certificate location missing:\n%s", output)
 	}
 }
 
