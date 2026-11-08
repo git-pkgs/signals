@@ -5,6 +5,7 @@ go 1.27.3
 require (
 	actionlint.kjanat.dev v1.17.0
 	github.com/git-pkgs/brief v0.15.1-0.20261107204040-d1ed5a631f83
+	github.com/git-pkgs/certs v0.1.1-0.20261104093717-2e1d0e2e0f63
 	github.com/git-pkgs/history v0.2.0
 	github.com/git-pkgs/languages v0.1.0
 	github.com/git-pkgs/licenses v0.10.1-0.20261107154534-00c5bf03ade8
@@ -36,6 +37,7 @@ require (
 	github.com/expr-lang/expr v1.17.8 // indirect
 	github.com/fatih/color v1.19.0 // indirect
 	github.com/flier/gohs v1.2.3 // indirect
+	github.com/git-pkgs/archives v0.10.0 // indirect
 	github.com/git-pkgs/bibtex v0.1.0 // indirect
 	github.com/git-pkgs/citation v0.1.0 // indirect
 	github.com/git-pkgs/codemeta v0.3.0 // indirect
@@ -62,6 +64,7 @@ require (
 	github.com/rrethy/ahocorasick v1.0.0 // indirect
 	github.com/rs/zerolog v1.35.1 // indirect
 	github.com/sergi/go-diff v1.4.0 // indirect
+	github.com/ulikunitz/xz v0.5.17 // indirect
 	go.yaml.in/yaml/v4 v4.0.0 // indirect
 	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/exp v0.0.0-20261106112924-d498a4c2cc9a // indirect
