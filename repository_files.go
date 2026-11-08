@@ -16,6 +16,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode"
 
 	gitcerts "github.com/git-pkgs/certs"
 	githistory "github.com/git-pkgs/history"
@@ -512,11 +513,18 @@ func certificateCoverageSignal(filePath string, diagnostics []gitcerts.Diagnosti
 
 func certificateValue(certificate gitcerts.Certificate) string {
 	return "spki=" + certificate.SPKISHA256 +
-		"; subject=" + certificate.Subject +
-		"; issuer=" + certificate.Issuer +
+		"; subject=" + certificateName(certificate.Subject) +
+		"; issuer=" + certificateName(certificate.Issuer) +
 		"; not-before=" + certificate.NotBefore.UTC().Format(time.RFC3339) +
 		"; not-after=" + certificate.NotAfter.UTC().Format(time.RFC3339) +
 		"; ca=" + strconv.FormatBool(certificate.IsCA)
+}
+
+func certificateName(value string) string {
+	if strings.IndexFunc(value, unicode.IsControl) >= 0 {
+		return strconv.Quote(value)
+	}
+	return value
 }
 
 func certificateLocation(location []gitcerts.Member) string {

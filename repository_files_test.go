@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"io/fs"
 	"math/big"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -160,6 +162,45 @@ func TestRepositoryFileSignalsDetectsCertificates(t *testing.T) {
 
 	if signals := repositorySignals(t, "testdata/trust.pem", pemData); len(signals) != 0 {
 		t.Fatalf("fixture certificate signals = %#v", signals)
+	}
+}
+
+func TestRepositoryFileSignalsEscapesCertificateControlCharacters(t *testing.T) {
+	pemData, fingerprint := testCertificatePEMWithName(t, 4, "Signals Test\n- forged")
+	identity := findCertificateSignal(t, repositorySignals(t, "trust.pem", pemData), "identity", fingerprint)
+	if strings.Contains(identity.Value, "\n") {
+		t.Fatalf("certificate identity contains a newline: %q", identity.Value)
+	}
+	if !strings.Contains(identity.Value, `subject="CN=Signals Test\n- forged"`) ||
+		!strings.Contains(identity.Value, `issuer="CN=Signals Test\n- forged"`) {
+		t.Fatalf("certificate identity = %#v", identity)
+	}
+}
+
+func TestLogEscapesCertificateControlCharacters(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.name", "Signals Test")
+	gitRun(t, repo, "config", "user.email", "signals@example.com")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+
+	pemData, _ := testCertificatePEMWithName(t, 5, "Signals Test\n- forged")
+	if err := os.WriteFile(filepath.Join(repo, "trust.pem"), pemData, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "add", "trust.pem")
+	gitRun(t, repo, "commit", "-m", "Add trust certificate")
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{testLogCommand, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
+		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
+	}
+	output := stdout.String()
+	if strings.Contains(output, "\n- forged") {
+		t.Fatalf("certificate identity created a report line:\n%s", output)
+	}
+	if !strings.Contains(output, `subject="CN=Signals Test\n- forged"`) {
+		t.Fatalf("escaped certificate identity missing:\n%s", output)
 	}
 }
 
@@ -514,12 +555,16 @@ func findCertificateSignal(t *testing.T, signals []Signal, kind, name string) Si
 }
 
 func testCertificatePEM(t *testing.T, serial int64) ([]byte, string) {
+	return testCertificatePEMWithName(t, serial, fmt.Sprintf("Signals Test CA %d", serial))
+}
+
+func testCertificatePEMWithName(t *testing.T, serial int64, commonName string) ([]byte, string) {
 	t.Helper()
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	name := pkix.Name{CommonName: fmt.Sprintf("Signals Test CA %d", serial)}
+	name := pkix.Name{CommonName: commonName}
 	template := &x509.Certificate{
 		SerialNumber:          big.NewInt(serial),
 		Subject:               name,
