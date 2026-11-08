@@ -545,6 +545,9 @@ func briefToolSignals(tools map[string][]gitbrief.Detection) []Signal {
 			if detection.Lockfile != "" {
 				paths = append(paths, detection.Lockfile)
 			}
+			if check == checkSecurityTool && len(paths) == 0 && detection.Confidence != gitbrief.ConfidenceHigh {
+				continue
+			}
 			if len(paths) == 0 {
 				signals = append(signals, Signal{Check: check, Kind: kind, Name: name})
 				continue

@@ -708,6 +708,62 @@ func TestLogTracksThreatSurfaceAcrossHistory(t *testing.T) {
 	}
 }
 
+func TestLogRequiresConfiguredSecurityToolEvidence(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.name", "Signals Test")
+	gitRun(t, repo, "config", "user.email", "signals@example.com")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+
+	writeFile(t, repo, "go.mod", "module example.com/project\n\ngo 1.27.3\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Add Go module")
+
+	writeFile(t, repo, testSemgrepConfigPath, "rules: []\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Configure Semgrep")
+
+	writeFile(t, repo, "Gemfile", "source \"https://rubygems.org\"\ngem \"brakeman\"\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Declare Brakeman")
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"log", testJSONLFlag, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
+		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
+	}
+	var records []jsonlRecord
+	for _, line := range strings.Split(strings.TrimSpace(stdout.String()), "\n") {
+		var record jsonlRecord
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatalf("decode JSONL: %v\n%s", err, line)
+		}
+		records = append(records, record)
+	}
+
+	module := findJSONLRecord(t, records, "Add Go module")
+	for _, change := range module.Changes {
+		if change.Check == checkSecurityTool && change.Name == "govulncheck" {
+			t.Fatalf("go.mod emitted govulncheck usage evidence: %#v", change)
+		}
+	}
+	semgrep := findJSONLRecord(t, records, "Configure Semgrep")
+	if !containsExactJSONLChange(semgrep.Changes, jsonlChange{
+		Change: changeName('+'), Check: checkSecurityTool, Kind: testSecurityScanKind,
+		Name: testSemgrepName, Path: testSemgrepConfigPath,
+	}) {
+		t.Fatalf("Semgrep configuration evidence missing:\n%s", stdout.String())
+	}
+	brakeman := findJSONLRecord(t, records, "Declare Brakeman")
+	if !containsExactJSONLChange(brakeman.Changes, jsonlChange{
+		Change: changeName('+'), Check: checkSecurityTool, Kind: testSecurityScanKind, Name: "Brakeman",
+	}) {
+		t.Fatalf("Brakeman dependency evidence missing:\n%s", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected detection errors:\n%s", stderr.String())
+	}
+}
+
 func TestLogDetectsLocalToolingSecretsAndREUSEAcrossHistory(t *testing.T) {
 	const prefixBeyondCommonScanLimit = 64*1024 + 1
 
