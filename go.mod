@@ -6,7 +6,7 @@ require (
 	actionlint.kjanat.dev v1.17.0
 	github.com/git-pkgs/brief v0.15.1-0.20261107204040-d1ed5a631f83
 	github.com/git-pkgs/certs v0.1.1-0.20261104093717-2e1d0e2e0f63
-	github.com/git-pkgs/gitignore v1.3.1-0.20261108175116-5fcc6a8ea053
+	github.com/git-pkgs/gitignore v1.3.1-0.20261108194038-d09d5ccc19b9
 	github.com/git-pkgs/history v0.2.0
 	github.com/git-pkgs/languages v0.1.0
 	github.com/git-pkgs/licenses v0.10.1-0.20261107154534-00c5bf03ade8
