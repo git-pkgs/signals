@@ -423,11 +423,14 @@ license = "Apache-2.0"
 	output := stdout.String()
 	for _, expected := range []string{
 		"+ License/declaration MIT OR Apache-2.0 at Cargo.toml",
+		"+ License/expression MIT OR Apache-2.0 at Cargo.toml = strict",
 		"+ License/file-reference at Cargo.toml = COPYING",
 		"+ License/license MIT at NOTICE",
 		"+ License/notice at NOTICE",
 		"- License/declaration MIT OR Apache-2.0 at Cargo.toml",
 		"+ License/declaration Apache-2.0 at Cargo.toml",
+		"- License/expression MIT OR Apache-2.0 at Cargo.toml = strict",
+		"+ License/expression Apache-2.0 at Cargo.toml = strict",
 		"- License/file-reference at Cargo.toml = COPYING",
 		"- License/license MIT at NOTICE",
 		"- License/notice at NOTICE",

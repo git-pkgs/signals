@@ -16,6 +16,7 @@ require (
 	github.com/git-pkgs/roles v0.1.3
 	github.com/git-pkgs/sbom v0.1.10-0.20261107160107-38436af679c6
 	github.com/git-pkgs/secrets v0.2.1-0.20261107154440-a977b8886af8
+	github.com/git-pkgs/spdx v0.3.6
 	github.com/git-pkgs/vers v0.7.2
 	github.com/go-git/go-git/v6 v6.0.0-beta.1
 	github.com/tidwall/jsonc v0.3.3
@@ -42,7 +43,6 @@ require (
 	github.com/git-pkgs/pom v0.1.8 // indirect
 	github.com/git-pkgs/purl v0.2.1 // indirect
 	github.com/git-pkgs/scan v0.1.1 // indirect
-	github.com/git-pkgs/spdx v0.3.6 // indirect
 	github.com/github/go-spdx/v2 v2.8.0 // indirect
 	github.com/go-git/gcfg/v2 v2.0.2 // indirect
 	github.com/go-git/go-billy/v6 v6.0.0-beta.1 // indirect
