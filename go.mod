@@ -6,6 +6,7 @@ require (
 	actionlint.kjanat.dev v1.17.0
 	github.com/git-pkgs/brief v0.15.1-0.20261107204040-d1ed5a631f83
 	github.com/git-pkgs/certs v0.1.1-0.20261104093717-2e1d0e2e0f63
+	github.com/git-pkgs/cwe v0.1.2-0.20261102114243-2d9276da42a5
 	github.com/git-pkgs/gitignore v1.3.1-0.20261108194038-d09d5ccc19b9
 	github.com/git-pkgs/history v0.2.0
 	github.com/git-pkgs/languages v0.1.0
@@ -16,6 +17,7 @@ require (
 	github.com/git-pkgs/manifests v0.13.1-0.20261107212808-69ba49d733ae
 	github.com/git-pkgs/reuse v0.2.0
 	github.com/git-pkgs/roles v0.1.3
+	github.com/git-pkgs/sarif v0.1.4-0.20261108175116-14294dee0dad
 	github.com/git-pkgs/sbom v0.1.10-0.20261107160107-38436af679c6
 	github.com/git-pkgs/secrets v0.2.1-0.20261107154440-a977b8886af8
 	github.com/git-pkgs/skills v0.2.1

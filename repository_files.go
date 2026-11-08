@@ -19,11 +19,13 @@ import (
 	"unicode"
 
 	gitcerts "github.com/git-pkgs/certs"
+	"github.com/git-pkgs/cwe"
 	githistory "github.com/git-pkgs/history"
 	gitlanguages "github.com/git-pkgs/languages"
 	gitlicenses "github.com/git-pkgs/licenses"
 	"github.com/git-pkgs/magic"
 	"github.com/git-pkgs/roles"
+	sarifsummary "github.com/git-pkgs/sarif/summary"
 	"github.com/git-pkgs/sbom"
 )
 
@@ -95,6 +97,9 @@ const (
 	asn1HeaderBytes                   = 2
 	asn1MaxLengthBytes                = 4
 	bitsPerByte                       = 8
+	sarifMaxBytes                     = 16 << 20
+	sarifMaxUniqueValues              = 5_000
+	sarifMaxTools                     = 100
 )
 
 var certificateFileExtensions = map[string]bool{
@@ -226,19 +231,11 @@ func repositoryFileSignalsFromFS(
 		})
 	}
 
-	if sbomContentPath(filePath) {
-		parsed, err := scanRepositoryFile(tree, filePath, func(reader io.Reader) ([]Signal, error) {
-			signal, ok, inspectErr := sbomSignal(filePath, reader)
-			if !ok {
-				return nil, inspectErr
-			}
-			return []Signal{signal}, inspectErr
-		})
-		if err != nil {
-			return nil, err
-		}
-		signals = append(signals, parsed...)
+	structured, err := repositoryStructuredSignals(tree, filePath)
+	if err != nil {
+		return nil, err
 	}
+	signals = append(signals, structured...)
 
 	if securityPolicyPath(filePath) {
 		parsed, err := scanRepositoryFile(tree, filePath, func(reader io.Reader) ([]Signal, error) {
@@ -272,6 +269,24 @@ func repositoryFileSignalsFromFS(
 		}
 	}
 	return signals, nil
+}
+
+func repositoryStructuredSignals(tree fs.FS, filePath string) ([]Signal, error) {
+	if sarifFilePath(filePath) {
+		return scanRepositoryFile(tree, filePath, func(reader io.Reader) ([]Signal, error) {
+			return sarifSignals(filePath, reader)
+		})
+	}
+	if !sbomContentPath(filePath) {
+		return nil, nil
+	}
+	return scanRepositoryFile(tree, filePath, func(reader io.Reader) ([]Signal, error) {
+		signal, ok, err := sbomSignal(filePath, reader)
+		if !ok {
+			return nil, err
+		}
+		return []Signal{signal}, err
+	})
 }
 
 func readRepositoryFile(tree fs.FS, filePath string, limit int64) ([]byte, error) {
@@ -657,6 +672,160 @@ func sbomFileName(filePath string) bool {
 	return false
 }
 
+func sarifFilePath(filePath string) bool {
+	labels, err := roles.Match(filePath)
+	if err == nil && (labels.BundledOrDerived() || labels.Has(roles.Test) || labels.Has(roles.Example)) {
+		return false
+	}
+	lower := strings.ToLower(path.Base(filePath))
+	return strings.HasSuffix(lower, ".sarif") || strings.HasSuffix(lower, ".sarif.json")
+}
+
+func sarifSignals(filePath string, reader io.Reader) ([]Signal, error) {
+	inspection, err := sarifsummary.Inspect(reader, sarifsummary.Options{
+		MaxBytes:        sarifMaxBytes,
+		MaxUniqueValues: sarifMaxUniqueValues,
+		MaxTools:        sarifMaxTools,
+	})
+	if errors.Is(err, sarifsummary.ErrInvalid) {
+		return []Signal{{
+			Check: checkSARIF,
+			Kind:  "candidate",
+			Name:  "invalid",
+			Path:  filePath,
+		}}, nil
+	}
+	if err != nil && !errors.Is(err, sarifsummary.ErrLimit) {
+		return nil, err
+	}
+
+	signals := []Signal{{
+		Check: checkSARIF,
+		Kind:  "document",
+		Name:  inspection.Version,
+		Value: "runs=" + strconv.Itoa(inspection.Runs) +
+			"; results=" + strconv.Itoa(inspection.Results) +
+			"; occurrences=" + strconv.Itoa(inspection.Occurrences) +
+			"; suppressed=" + strconv.Itoa(inspection.SuppressedResults),
+		Path: filePath,
+	}}
+	for _, tool := range inspection.Tools {
+		value := ""
+		if tool.SemanticVersion != "" {
+			value = "semantic-version=" + tool.SemanticVersion
+		}
+		if tool.Version != "" {
+			if value != "" {
+				value += "; "
+			}
+			value += "version=" + tool.Version
+		}
+		signals = append(signals, Signal{
+			Check: checkSARIF,
+			Kind:  "tool",
+			Name:  tool.Name,
+			Value: value,
+			Path:  filePath,
+		})
+	}
+	signals = appendSARIFCounts(signals, filePath, "level", inspection.Levels)
+	signals = appendSARIFCounts(signals, filePath, "baseline", inspection.BaselineStates)
+	signals = appendSARIFCounts(signals, filePath, "rule", inspection.Rules)
+	signals = appendSARIFCounts(signals, filePath, "taxon", inspection.Taxa)
+	signals = appendSARIFCWE(signals, filePath, inspection.Taxa)
+	signals = appendSARIFCounts(signals, filePath, "suppression", inspection.Suppressions)
+	if inspection.Truncated || errors.Is(err, sarifsummary.ErrLimit) {
+		signals = append(signals, Signal{
+			Check: checkSARIF,
+			Kind:  "coverage",
+			Name:  "truncated",
+			Path:  filePath,
+		})
+	}
+	sortSignals(signals)
+	return deduplicateSignals(signals), nil
+}
+
+func appendSARIFCWE(signals []Signal, filePath string, taxa map[string]int) []Signal {
+	type weakness struct {
+		count      int
+		name       string
+		categoryID string
+	}
+	weaknesses := make(map[string]weakness)
+	categories := make(map[string]int)
+	categoryNames := make(map[string]string)
+	for rawID, count := range taxa {
+		id, entry, ok := cwe.Lookup(rawID)
+		if !ok {
+			continue
+		}
+		categoryID := cwe.CategoryID(entry.Category)
+		current := weaknesses[id]
+		current.count += count
+		current.name = entry.Name
+		current.categoryID = categoryID
+		weaknesses[id] = current
+		if categoryID != "" {
+			categories[categoryID] += count
+			categoryNames[categoryID] = entry.Category
+		}
+	}
+
+	ids := make([]string, 0, len(weaknesses))
+	for id := range weaknesses {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		item := weaknesses[id]
+		value := "count=" + strconv.Itoa(item.count) + "; name=" + item.name
+		if item.categoryID != "" {
+			value += "; category=" + item.categoryID
+		}
+		signals = append(signals, Signal{
+			Check: checkSARIF,
+			Kind:  "weakness",
+			Name:  id,
+			Value: value,
+			Path:  filePath,
+		})
+	}
+	ids = ids[:0]
+	for id := range categories {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		signals = append(signals, Signal{
+			Check: checkSARIF,
+			Kind:  "weakness-category",
+			Name:  id,
+			Value: "count=" + strconv.Itoa(categories[id]) + "; name=" + categoryNames[id],
+			Path:  filePath,
+		})
+	}
+	return signals
+}
+
+func appendSARIFCounts(signals []Signal, filePath, kind string, counts map[string]int) []Signal {
+	names := make([]string, 0, len(counts))
+	for name := range counts {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		signals = append(signals, Signal{
+			Check: checkSARIF,
+			Kind:  kind,
+			Name:  name,
+			Value: strconv.Itoa(counts[name]),
+			Path:  filePath,
+		})
+	}
+	return signals
+}
+
 func securityPolicyPath(filePath string) bool {
 	switch strings.ToLower(filePath) {
 	case "security.md", ".github/security.md", "docs/security.md",
@@ -887,7 +1056,7 @@ func (d *localDetectors) runRepositoryFiles(
 	}
 
 	delete(current.errors, detectorRepositoryFiles)
-	checks := []string{checkBinaryArtifacts, checkCertificate, checkFuzzing, checkLicense, checkSAST, checkSBOM, checkSecurityPolicy}
+	checks := []string{checkBinaryArtifacts, checkCertificate, checkFuzzing, checkLicense, checkSARIF, checkSAST, checkSBOM, checkSecurityPolicy}
 	if forceFull {
 		for _, check := range checks {
 			switch check {

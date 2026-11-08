@@ -32,6 +32,7 @@ const (
 	testJSONLFlag          = "--jsonl"
 	testLogCommand         = "log"
 	testPackageName        = "example"
+	testSARIFPath          = "results.sarif"
 	testSecurityPolicyPath = ".github/SECURITY.md"
 	testStatsFlag          = "--stats"
 	testWorkersFlag        = "--workers"
@@ -293,6 +294,39 @@ func TestRepositoryFileSignalsReportsUnrecognizedSBOMCandidate(t *testing.T) {
 	}
 }
 
+func TestRepositoryFileSignalsSummarizesSARIF(t *testing.T) {
+	signals := repositorySignals(t, testSARIFPath, []byte(testSARIFLog))
+	for _, wanted := range []Signal{
+		{Check: checkSARIF, Kind: "document", Name: "2.1.0", Value: "runs=1; results=2; occurrences=3; suppressed=1", Path: testSARIFPath},
+		{Check: checkSARIF, Kind: "tool", Name: "CodeQL", Value: "semantic-version=2.20.0", Path: testSARIFPath},
+		{Check: checkSARIF, Kind: "level", Name: "error", Value: "1", Path: testSARIFPath},
+		{Check: checkSARIF, Kind: "level", Name: "warning", Value: "1", Path: testSARIFPath},
+		{Check: checkSARIF, Kind: "rule", Name: "js/sql-injection", Value: "1", Path: testSARIFPath},
+		{Check: checkSARIF, Kind: "rule", Name: "js/xss", Value: "1", Path: testSARIFPath},
+		{Check: checkSARIF, Kind: "taxon", Name: "CWE-79", Value: "1", Path: testSARIFPath},
+		{Check: checkSARIF, Kind: "weakness", Name: "CWE-79", Value: "count=1; name=Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting'); category=CWE-1409", Path: testSARIFPath},
+		{Check: checkSARIF, Kind: "weakness-category", Name: "CWE-1409", Value: "count=1; name=Injection", Path: testSARIFPath},
+		{Check: checkSARIF, Kind: "suppression", Name: "inSource/accepted", Value: "1", Path: testSARIFPath},
+	} {
+		if !containsExactSignal(signals, wanted) {
+			t.Errorf("signal missing: %#v\ngot: %#v", wanted, signals)
+		}
+	}
+
+	invalid := repositorySignals(t, "invalid.sarif.json", []byte(`{"name":"not SARIF"}`))
+	if !containsExactSignal(invalid, Signal{
+		Check: checkSARIF,
+		Kind:  "candidate",
+		Name:  "invalid",
+		Path:  "invalid.sarif.json",
+	}) {
+		t.Fatalf("invalid SARIF signals = %#v", invalid)
+	}
+	if signals := repositorySignals(t, "testdata/results.sarif", []byte(testSARIFLog)); len(signals) != 0 {
+		t.Fatalf("fixture SARIF signals = %#v", signals)
+	}
+}
+
 func TestRepositoryFileSignalsDoesNotTreatSourceNamesAsLegalEvidence(t *testing.T) {
 	for _, filePath := range []string{"notice.go", "licenses/_spdx.py"} {
 		if signals := repositorySignals(t, filePath, []byte("package example\n")); len(signals) != 0 {
@@ -473,6 +507,7 @@ func TestLogDetectsRepositoryFileSignals(t *testing.T) {
 	writeFile(t, repo, testLicensePath, mitLicenseText)
 	writeFile(t, repo, "SECURITY.md", "Report issues to security@example.com.\n")
 	writeFile(t, repo, "bom.json", `{"bomFormat":"CycloneDX","specVersion":"1.6","version":1}`)
+	writeFile(t, repo, testSARIFPath, testSARIFLog)
 	writeFile(t, repo, "tool.wasm", string([]byte{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00}))
 	paddingLine := "// history padding\n"
 	paddingLines := int(repositoryFileContentBytes)/len(paddingLine) + 1
@@ -489,6 +524,8 @@ func TestLogDetectsRepositoryFileSignals(t *testing.T) {
 	for _, expected := range []string{
 		"+ Binary-Artifacts/artifact wasm at tool.wasm = application/wasm",
 		"+ License/license MIT at LICENSE",
+		"+ SARIF/rule js/xss at results.sarif = 1",
+		"+ SARIF/tool CodeQL at results.sarif = semantic-version=2.20.0",
 		"+ SBOM/document cyclonedx at bom.json:1 = 1.6",
 		"+ Security-Policy/policy at SECURITY.md:1",
 		"+ Security-Policy/email at SECURITY.md:1 = security@example.com",
@@ -537,6 +574,31 @@ func TestLogDetectsCertificateChangesAcrossHistory(t *testing.T) {
 		t.Fatalf("unexpected detection errors:\n%s", stderr.String())
 	}
 }
+
+const testSARIFLog = `{
+  "version": "2.1.0",
+  "runs": [{
+    "tool": {"driver": {
+      "name": "CodeQL",
+      "semanticVersion": "2.20.0",
+      "rules": [{
+        "id": "js/xss",
+        "defaultConfiguration": {"level": "error"}
+      }, {"id": "js/sql-injection"}]
+    }},
+    "results": [{
+      "ruleId": "js/xss",
+      "baselineState": "new",
+      "occurrenceCount": 2,
+      "message": {"text": "finding"},
+      "suppressions": [{"kind": "inSource", "status": "accepted"}],
+      "taxa": [{"id": "CWE-79"}]
+    }, {
+      "ruleIndex": 1,
+      "message": {"text": "uses default warning level"}
+    }]
+  }]
+}`
 
 func repositorySignals(t *testing.T, filePath string, data []byte) []Signal {
 	t.Helper()
