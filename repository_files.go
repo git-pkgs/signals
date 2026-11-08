@@ -98,6 +98,7 @@ const (
 	asn1MaxLengthBytes                = 4
 	bitsPerByte                       = 8
 	sarifMaxBytes                     = 16 << 20
+	sarifInvalidName                  = "invalid"
 	sarifMaxUniqueValues              = 5_000
 	sarifMaxTools                     = 100
 )
@@ -691,7 +692,7 @@ func sarifSignals(filePath string, reader io.Reader) ([]Signal, error) {
 		return []Signal{{
 			Check: checkSARIF,
 			Kind:  "candidate",
-			Name:  "invalid",
+			Name:  sarifInvalidName,
 			Path:  filePath,
 		}}, nil
 	}
