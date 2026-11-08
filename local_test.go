@@ -14,6 +14,7 @@ const (
 	testRubyPath          = "app.rb"
 	testSemgrepConfigPath = ".semgrep.yml"
 	testSemgrepName       = "Semgrep"
+	testSecurityCategory  = "security"
 	testSecurityScanKind  = "security-scanning"
 	testTemplatePath      = "template.yml"
 	testThreatCWE         = "CWE-79"
@@ -59,6 +60,30 @@ func TestRunBriefRefreshesOnlyCheckedTools(t *testing.T) {
 		Path:  testSemgrepConfigPath,
 	}) {
 		t.Fatalf("unchanged Semgrep signal was removed: %#v", current.signals)
+	}
+}
+
+func TestBriefToolSignalsRequireSecurityUsageEvidence(t *testing.T) {
+	taxonomy := &gitbrief.Taxonomy{Function: []string{testSecurityScanKind}}
+	tools := map[string][]gitbrief.Detection{
+		testSecurityCategory: {
+			{Name: "applicable", Category: testSecurityCategory, Confidence: gitbrief.ConfidenceMedium, Taxonomy: taxonomy},
+			{Name: "configured", Category: testSecurityCategory, Confidence: gitbrief.ConfidenceMedium, ConfigFiles: []string{"scanner.yml"}, Taxonomy: taxonomy},
+			{Name: "declared", Category: testSecurityCategory, Confidence: gitbrief.ConfidenceHigh, Taxonomy: taxonomy},
+		},
+	}
+
+	signals := briefToolSignals(tools)
+	if containsExactSignal(signals, Signal{Check: checkSecurityTool, Kind: testSecurityScanKind, Name: "applicable"}) {
+		t.Fatalf("applicability-only security tool emitted: %#v", signals)
+	}
+	for _, wanted := range []Signal{
+		{Check: checkSecurityTool, Kind: testSecurityScanKind, Name: "configured", Path: "scanner.yml"},
+		{Check: checkSecurityTool, Kind: testSecurityScanKind, Name: "declared"},
+	} {
+		if !containsExactSignal(signals, wanted) {
+			t.Errorf("missing configured security tool %#v: %#v", wanted, signals)
+		}
 	}
 }
 
