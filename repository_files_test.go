@@ -600,19 +600,64 @@ const testSARIFLog = `{
         "defaultConfiguration": {"level": "error"}
       }, {"id": "js/sql-injection"}]
     }},
+    "taxonomies": [{
+      "name": "CWE",
+      "guid": "33333333-3333-4333-8333-333333333333",
+      "taxa": [{"id": "79"}]
+    }],
     "results": [{
       "ruleId": "js/xss",
       "baselineState": "new",
       "occurrenceCount": 2,
       "message": {"text": "finding"},
       "suppressions": [{"kind": "inSource", "status": "accepted"}],
-      "taxa": [{"id": "CWE-79"}]
+      "taxa": [{
+        "id": "79",
+        "toolComponent": {
+          "name": "CWE",
+          "guid": "33333333-3333-4333-8333-333333333333"
+        }
+      }]
     }, {
       "ruleIndex": 1,
       "message": {"text": "uses default warning level"}
     }]
   }]
 }`
+
+func TestRepositoryFileSignalsKeepsCustomTaxaOutOfCWE(t *testing.T) {
+	input := []byte(`{
+  "version": "2.1.0",
+  "runs": [{
+    "tool": {"driver": {
+      "name": "custom-scanner",
+      "taxa": [{"id": "79"}]
+    }},
+    "results": [{
+      "ruleId": "custom-rule",
+      "message": {"text": "finding"},
+      "taxa": [{"index": 0}]
+    }]
+  }]
+}`)
+
+	signals := repositorySignals(t, testSARIFPath, input)
+	if !containsExactSignal(signals, Signal{
+		Check: checkSARIF,
+		Kind:  "taxon",
+		Name:  "custom-scanner:79",
+		Value: "1",
+		Path:  testSARIFPath,
+	}) {
+		t.Fatalf("custom taxon missing: %#v", signals)
+	}
+	for _, signal := range signals {
+		if signal.Check == checkSARIF &&
+			(signal.Kind == "weakness" || signal.Kind == "weakness-category") {
+			t.Fatalf("custom taxon classified as CWE: %#v", signal)
+		}
+	}
+}
 
 func repositorySignals(t *testing.T, filePath string, data []byte) []Signal {
 	t.Helper()

@@ -731,7 +731,7 @@ func sarifSignals(filePath string, reader io.Reader) ([]Signal, error) {
 	signals = appendSARIFCounts(signals, filePath, "level", inspection.Levels)
 	signals = appendSARIFCounts(signals, filePath, "baseline", inspection.BaselineStates)
 	signals = appendSARIFCounts(signals, filePath, "rule", inspection.Rules)
-	signals = appendSARIFCounts(signals, filePath, "taxon", inspection.Taxa)
+	signals = appendSARIFTaxa(signals, filePath, inspection.Taxa)
 	signals = appendSARIFCWE(signals, filePath, inspection.Taxa)
 	signals = appendSARIFCounts(signals, filePath, "suppression", inspection.Suppressions)
 	if inspection.Truncated || errors.Is(err, sarifsummary.ErrLimit) {
@@ -746,7 +746,36 @@ func sarifSignals(filePath string, reader io.Reader) ([]Signal, error) {
 	return deduplicateSignals(signals), nil
 }
 
-func appendSARIFCWE(signals []Signal, filePath string, taxa map[string]int) []Signal {
+func appendSARIFTaxa(signals []Signal, filePath string, taxa []sarifsummary.Taxon) []Signal {
+	for _, taxon := range taxa {
+		name := taxon.ID
+		if name == "" {
+			name = taxon.GUID
+		}
+		switch {
+		case isCWETaxonomy(taxon.TaxonomyName):
+			if id, _, ok := cwe.Lookup(name); ok {
+				name = id
+			} else {
+				name = "CWE:" + name
+			}
+		case taxon.TaxonomyName != "":
+			name = taxon.TaxonomyName + ":" + name
+		case taxon.TaxonomyGUID != "":
+			name = taxon.TaxonomyGUID + ":" + name
+		}
+		signals = append(signals, Signal{
+			Check: checkSARIF,
+			Kind:  "taxon",
+			Name:  name,
+			Value: strconv.Itoa(taxon.Count),
+			Path:  filePath,
+		})
+	}
+	return signals
+}
+
+func appendSARIFCWE(signals []Signal, filePath string, taxa []sarifsummary.Taxon) []Signal {
 	type weakness struct {
 		count      int
 		name       string
@@ -755,19 +784,22 @@ func appendSARIFCWE(signals []Signal, filePath string, taxa map[string]int) []Si
 	weaknesses := make(map[string]weakness)
 	categories := make(map[string]int)
 	categoryNames := make(map[string]string)
-	for rawID, count := range taxa {
-		id, entry, ok := cwe.Lookup(rawID)
+	for _, taxon := range taxa {
+		if !isCWETaxonomy(taxon.TaxonomyName) {
+			continue
+		}
+		id, entry, ok := cwe.Lookup(taxon.ID)
 		if !ok {
 			continue
 		}
 		categoryID := cwe.CategoryID(entry.Category)
 		current := weaknesses[id]
-		current.count += count
+		current.count += taxon.Count
 		current.name = entry.Name
 		current.categoryID = categoryID
 		weaknesses[id] = current
 		if categoryID != "" {
-			categories[categoryID] += count
+			categories[categoryID] += taxon.Count
 			categoryNames[categoryID] = entry.Category
 		}
 	}
@@ -806,6 +838,10 @@ func appendSARIFCWE(signals []Signal, filePath string, taxa map[string]int) []Si
 		})
 	}
 	return signals
+}
+
+func isCWETaxonomy(name string) bool {
+	return strings.EqualFold(name, "CWE") || strings.EqualFold(name, "Common Weakness Enumeration")
 }
 
 func appendSARIFCounts(signals []Signal, filePath, kind string, counts map[string]int) []Signal {
