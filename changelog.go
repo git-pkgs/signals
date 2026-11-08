@@ -18,6 +18,7 @@ const (
 var (
 	securityChangelogTermPattern = regexp.MustCompile(`(?i)\b(?:security|vulnerabilit(?:y|ies)|CVE-\d{4}-\d{4,7}|GHSA-[23456789cfghjmpqrvwx]{4}-[23456789cfghjmpqrvwx]{4}-[23456789cfghjmpqrvwx]{4})\b`)
 	securityAdvisoryPattern      = regexp.MustCompile(`(?i)\b(?:CVE-\d{4}-\d{4,7}|GHSA-[23456789cfghjmpqrvwx]{4}-[23456789cfghjmpqrvwx]{4}-[23456789cfghjmpqrvwx]{4})\b`)
+	securitySectionPattern       = regexp.MustCompile(`(?i)\b(?:security|vulnerabilit(?:y|ies))\b`)
 )
 
 func securityChangelogSignals(filePath string, reader io.Reader) ([]Signal, error) {
@@ -144,8 +145,7 @@ func changelogHeadingCandidate(line string) bool {
 }
 
 func securitySectionHeading(heading string) bool {
-	lower := strings.ToLower(heading)
-	return strings.Contains(lower, "security") || strings.Contains(lower, "vulnerabilit")
+	return securitySectionPattern.MatchString(heading)
 }
 
 func usefulSecurityChangelogEntry(entry string) bool {

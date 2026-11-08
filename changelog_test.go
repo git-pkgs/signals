@@ -15,7 +15,7 @@ func TestSecurityChangelogSignals(t *testing.T) {
 
 	signals, err := securityChangelogSignals(testChangelogPath, strings.NewReader(`# 2.0.0
 
-## Security
+## Security fixes
 
 - `+testSecurityChangelogEntry+`
 - Fix CVE-2026-12345 in the parser
@@ -57,6 +57,10 @@ func TestSecurityChangelogSignalsIgnoresHeadingsAndUnrelatedEntries(t *testing.T
 # Changed
 
 - Improve parser performance
+
+# Food insecurity data
+
+- Refresh population sample
 `))
 	if err != nil {
 		t.Fatal(err)

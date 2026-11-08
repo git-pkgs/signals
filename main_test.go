@@ -229,7 +229,8 @@ func TestLogDetectsStableSecurityChangelogEntries(t *testing.T) {
 	gitRun(t, repo, "add", ".")
 	gitRun(t, repo, "commit", "-m", "Initial commit")
 
-	oldEntry := "# 1.0.0\n\n## Security\n\n- Reject unsafe archive paths\n"
+	oldEntry := "# 1.0.0\n\n## Security fixes\n\n- Reject unsafe archive paths\n" +
+		"\n## Food insecurity data\n\n- Refresh population sample\n"
 	writeFile(t, repo, testChangelogPath, oldEntry)
 	gitRun(t, repo, "add", ".")
 	gitRun(t, repo, "commit", "-m", "Document security hardening")
@@ -252,6 +253,9 @@ func TestLogDetectsStableSecurityChangelogEntries(t *testing.T) {
 	}
 	if strings.Contains(stdout.String(), "- Security-Changelog/entry") {
 		t.Fatalf("stable changelog entry was removed after moving down the file:\n%s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "Refresh population sample") {
+		t.Fatalf("unrelated heading produced changelog evidence:\n%s", stdout.String())
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("unexpected detection errors:\n%s", stderr.String())
