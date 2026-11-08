@@ -1,6 +1,6 @@
 # signals
 
-A command for tracing security-relevant evidence stored in Git across repository history. It shows when detected evidence appears, changes, or disappears, with the commit and path behind each change. `signals` walks commit trees with [`github.com/git-pkgs/history`](https://github.com/git-pkgs/history). Local parsers detect workflow risks and permissions, artifact-provenance configuration, CI and security tools, threat surface, secrets, certificates and trust stores, REUSE metadata, package managers, manifests, lockfiles, dependency pinning, update configuration, licenses, SBOMs, fuzzers, and binary artifacts. Commit data adds dependency-bot and signature events plus contributor, maintenance, review, and signing metrics. The output contains the evidence and its provenance without calculating a score. The scan reads local Git objects, with forge APIs, release APIs, credential validation, and external services disabled.
+A command for tracing security-relevant evidence stored in Git across repository history. It shows when detected evidence appears, changes, or disappears, with the commit and path behind each change. `signals` walks commit trees with [`github.com/git-pkgs/history`](https://github.com/git-pkgs/history). Local parsers detect workflow risks and permissions, artifact-provenance configuration, CI and security tools, threat surface, secrets, certificates and trust stores, Agent Skills, REUSE metadata, package managers, manifests, lockfiles, dependency pinning, update configuration, licenses, SBOMs, fuzzers, and binary artifacts. Commit data adds dependency-bot and signature events plus contributor, maintenance, review, and signing metrics. The output contains the evidence and its provenance without calculating a score. The scan reads local Git objects, with forge APIs, release APIs, credential validation, and external services disabled.
 
 The local-only timeline answers questions about when repository evidence changed. Examples include:
 
@@ -132,6 +132,7 @@ The additional detectors use the same persistent signal model. A threat-surface 
 | Check | Local evidence |
 | --- | --- |
 | Artifact-Provenance | GitHub artifact-attestation actions and SLSA generator reusable workflows, including the workflow path; configuration does not show that a run completed or its claims were verified |
+| Agent-Skill | Skill metadata, instruction digests, allowed tools, and script digests with file modes; scripts over 4 MB record size and mode without a content digest, and instruction text is not retained in output |
 | CI | CI configuration detected by the Brief knowledge base, including GitHub Actions, GitLab CI, Azure Pipelines, CircleCI, Jenkins, Buildkite, Drone, and Travis CI |
 | Build | Tools classified as build tools by Brief, including Make, CMake, Meson, Bazel, Buck, and language-specific build tools |
 | Certificate | Certificate identities, fixed validity dates, CA status, trust-store collection digests, matches against embedded reference catalogs, and incomplete or oversized scan coverage |
@@ -159,7 +160,7 @@ The additional detectors use the same persistent signal model. A threat-surface 
 
 ## History scanning
 
-The root commit and missing history boundaries receive a full scan. Later commits reuse their first parent's signal state and update the paths changed by that commit. Cross-file detectors, including dependency-update configuration and REUSE metadata, receive a full commit tree when one of their inputs changes.
+The root commit and missing history boundaries receive a full scan. Later commits reuse their first parent's signal state and update the paths changed by that commit. Cross-file detectors, including Agent Skills, dependency-update configuration, and REUSE metadata, receive a full commit tree when one of their inputs changes. Agent Skills rerun when a `SKILL.md` or a file inside a known skill package changes.
 
 Parser results for changed files are cached by Git blob OID and path for the whole run. Repository files that cannot contain a certificate, license, SBOM, fuzzer, policy, or SAST configuration need only a 1 KB prefix for binary classification. Commit reading can run concurrently, while signal-state updates remain ordered. `github.com/git-pkgs/languages` keeps a language inventory so Brief can rerun language-gated detection only when needed. `github.com/git-pkgs/roles` removes bundled and derived paths from fuzzing and license detection, and removes test, fixture, example, cache, and build-output paths from certificate detection. Test paths remain eligible for fuzz detection because fuzz targets commonly use them.
 
@@ -181,6 +182,7 @@ The local detectors share parsers and changed-path caches across related signals
 - [`github.com/git-pkgs/reuse`](https://github.com/git-pkgs/reuse) resolves SPDX headers, sidecars, REUSE.toml annotations, and DEP5 metadata from an `fs.FS` commit tree.
 - [`github.com/git-pkgs/roles`](https://github.com/git-pkgs/roles) classifies CI, fuzz, legal, generated, vendored, and packaging paths.
 - [`github.com/git-pkgs/secrets`](https://github.com/git-pkgs/secrets) scans changed blob content with its embedded local rule corpus.
+- [`github.com/git-pkgs/skills`](https://github.com/git-pkgs/skills) discovers and parses Agent Skill packages from commit trees.
 
 Actionlint parses each changed Actions workflow once for Artifact-Provenance, Dangerous-Workflow, SAST, Token-Permissions, Cache-Mode, Job-Timeout, Packaging, Package-Provenance, and Runner-Selection signals. Package parsing separately records Actions references and their pinning state. Packaging observations cover known Actions and literal commands in `run:` steps without treating their presence as evidence of a successful workflow run. Package provenance requires an explicit npm setting, or an OIDC-enabled PyPI publication without a configured password or uv token. Runner observations record configuration without determining which machine handled a particular job.
 

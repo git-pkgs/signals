@@ -17,6 +17,7 @@ require (
 	github.com/git-pkgs/roles v0.1.3
 	github.com/git-pkgs/sbom v0.1.10-0.20261107160107-38436af679c6
 	github.com/git-pkgs/secrets v0.2.1-0.20261107154440-a977b8886af8
+	github.com/git-pkgs/skills v0.2.1
 	github.com/git-pkgs/spdx v0.3.6
 	github.com/git-pkgs/vers v0.7.2
 	github.com/go-git/go-git/v6 v6.0.0-beta.1
