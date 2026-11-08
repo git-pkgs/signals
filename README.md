@@ -165,8 +165,8 @@ The additional detectors use the same persistent signal model. A threat-surface 
 | REUSE | Per-file SPDX license declarations, REUSE.toml or DEP5 metadata, and the number of non-empty covered files with both license and copyright information |
 | Security-Changelog | CVE and GHSA references, security-related entries, and list entries under security sections in changelog files recognized by Brief |
 | Security-Documentation | Threat models, security audit or review files, and disclosure documents matched by Brief resource definitions outside bundled or derived paths |
-| Artifact-Signing | GoReleaser artifact, container, and binary signing configuration, including the command and selected artifact type |
-| SBOM-Generation | GoReleaser SBOM generation configuration, including the command and selected artifact type |
+| Artifact-Signing | GoReleaser artifact, container, binary, and native package signing configuration, including the mechanism, artifact type, and selected IDs |
+| SBOM-Generation | GoReleaser SBOM generation configuration, including the command, artifact type, and selected IDs |
 
 ## History scanning
 
