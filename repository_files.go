@@ -10,11 +10,15 @@ import (
 	"io/fs"
 	"path"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+	"unicode"
 
+	gitcerts "github.com/git-pkgs/certs"
 	githistory "github.com/git-pkgs/history"
 	gitlanguages "github.com/git-pkgs/languages"
 	gitlicenses "github.com/git-pkgs/licenses"
@@ -73,12 +77,31 @@ var fuzzPatterns = map[string][]fuzzPattern{
 var sonarPOMPattern = regexp.MustCompile(`<sonar\.host\.url>\s*([^<\s]+)\s*</sonar\.host\.url>`)
 
 const (
-	repositoryFilePrefixBytes        = 1024
-	repositoryFileContentBytes int64 = 1 << 20
-	repositoryFileLineBytes          = 1 << 20
-	repositoryFileScanBytes          = 64 << 10
-	repositoryFileMatchBytes         = 4 << 10
+	repositoryFilePrefixBytes         = 1024
+	repositoryFileContentBytes  int64 = 1 << 20
+	repositoryFileLineBytes           = 1 << 20
+	repositoryFileScanBytes           = 64 << 10
+	repositoryFileMatchBytes          = 4 << 10
+	certificateMaxInputBytes          = 8 << 20
+	certificateMaxExpandedBytes       = 32 << 20
+	certificateMaxEntries             = 10_000
+	certificateMaxDepth               = 3
+	certificateMaxOccurrences         = 5_000
+	certificateMaxDiagnostics         = 100
+	certificateCoverageKind           = "coverage"
+	asn1SequenceTag                   = 0x30
+	asn1LongLengthFlag                = 0x80
+	asn1LengthMask                    = 0x7f
+	asn1HeaderBytes                   = 2
+	asn1MaxLengthBytes                = 4
+	bitsPerByte                       = 8
 )
+
+var certificateFileExtensions = map[string]bool{
+	".cer": true, ".crt": true, ".der": true, ".jks": true,
+	".keystore": true, ".p12": true, ".pem": true, ".pfx": true,
+	".truststore": true,
+}
 
 type fuzzMatchKey struct {
 	pattern int
@@ -119,7 +142,7 @@ func repositoryFileSignalsForChanges(
 			continue
 		}
 
-		parsed, err := repositoryFileSignalsFromFS(ctx, tree, filePath)
+		parsed, err := repositoryFileSignalsFromFS(ctx, tree, filePath, info.Size())
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
@@ -144,7 +167,11 @@ func allRepositoryFileSignals(ctx context.Context, tree fs.FS) ([]Signal, error)
 		if filePath == "." || entry.IsDir() {
 			return nil
 		}
-		parsed, err := repositoryFileSignalsFromFS(ctx, tree, filePath)
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		parsed, err := repositoryFileSignalsFromFS(ctx, tree, filePath, info.Size())
 		if err != nil {
 			return fmt.Errorf("read repository file %s: %w", filePath, err)
 		}
@@ -158,7 +185,12 @@ func allRepositoryFileSignals(ctx context.Context, tree fs.FS) ([]Signal, error)
 	return deduplicateSignals(signals), nil
 }
 
-func repositoryFileSignalsFromFS(ctx context.Context, tree fs.FS, filePath string) ([]Signal, error) {
+func repositoryFileSignalsFromFS(
+	ctx context.Context,
+	tree fs.FS,
+	filePath string,
+	size int64,
+) ([]Signal, error) {
 	prefix, err := readRepositoryFile(tree, filePath, repositoryFilePrefixBytes)
 	if err != nil {
 		return nil, err
@@ -167,6 +199,12 @@ func repositoryFileSignalsFromFS(ctx context.Context, tree fs.FS, filePath strin
 	if signal, ok := binaryArtifactSignal(filePath, prefix, true); ok {
 		signals = append(signals, signal)
 	}
+
+	certificates, err := repositoryCertificateSignals(ctx, tree, filePath, prefix, size)
+	if err != nil {
+		return nil, err
+	}
+	signals = append(signals, certificates...)
 
 	license, notice := legalFileKinds(filePath)
 	if license || notice {
@@ -311,6 +349,194 @@ func binaryArtifactSignal(filePath string, data []byte, prefix bool) (Signal, bo
 		Value: result.MIME,
 		Path:  filePath,
 	}, true
+}
+
+func certificateFileCandidate(filePath string, prefix []byte, size int64) bool {
+	labels, err := roles.Match(filePath)
+	if err == nil && (labels.Has(roles.Test) || labels.Has(roles.Fixture) || labels.Has(roles.Example) ||
+		labels.Has(roles.Cache) || labels.Has(roles.BuildOutput)) {
+		return false
+	}
+	if certificateFileExtensions[strings.ToLower(path.Ext(filePath))] {
+		return true
+	}
+	base := strings.ToLower(path.Base(filePath))
+	if base == "cacerts" || base == "ca-bundle" || base == "truststore" {
+		return true
+	}
+	if bytes.Contains(prefix, []byte("-----BEGIN CERTIFICATE-----")) {
+		return true
+	}
+	if len(prefix) >= 4 && bytes.Equal(prefix[:4], []byte{0xfe, 0xed, 0xfe, 0xed}) {
+		return true
+	}
+	if asn1Size := certificateASN1Size(prefix); asn1Size > 0 && asn1Size == size {
+		return true
+	}
+	switch magic.DetectPrefix(prefix).Format {
+	case magic.FormatZIP, magic.FormatTAR, magic.FormatGZIP, magic.FormatBZIP2, magic.FormatXZ, magic.FormatZstd:
+		return true
+	default:
+		return false
+	}
+}
+
+func repositoryCertificateSignals(
+	ctx context.Context,
+	tree fs.FS,
+	filePath string,
+	prefix []byte,
+	size int64,
+) ([]Signal, error) {
+	if !certificateFileCandidate(filePath, prefix, size) {
+		return nil, nil
+	}
+	if size > certificateMaxInputBytes {
+		return []Signal{{
+			Check: checkCertificate,
+			Kind:  certificateCoverageKind,
+			Name:  "oversized",
+			Value: "bytes=" + strconv.FormatInt(size, 10) +
+				"; limit=" + strconv.FormatInt(certificateMaxInputBytes, 10),
+			Path: filePath,
+		}}, nil
+	}
+	return scanRepositoryFile(tree, filePath, func(reader io.Reader) ([]Signal, error) {
+		return certificateSignals(ctx, filePath, reader)
+	})
+}
+
+func certificateASN1Size(prefix []byte) int64 {
+	if len(prefix) < asn1HeaderBytes || prefix[0] != asn1SequenceTag {
+		return 0
+	}
+	length := int64(prefix[1])
+	header := int64(asn1HeaderBytes)
+	if prefix[1]&asn1LongLengthFlag != 0 {
+		bytes := int(prefix[1] & asn1LengthMask)
+		if bytes == 0 || bytes > asn1MaxLengthBytes || len(prefix) < asn1HeaderBytes+bytes {
+			return 0
+		}
+		length = 0
+		for _, value := range prefix[asn1HeaderBytes : asn1HeaderBytes+bytes] {
+			length = length<<bitsPerByte | int64(value)
+		}
+		header += int64(bytes)
+	}
+	return header + length
+}
+
+func certificateSignals(ctx context.Context, filePath string, reader io.Reader) ([]Signal, error) {
+	inventory, err := gitcerts.Scan(ctx, filePath, reader, gitcerts.Options{
+		MaxInputBytes:    certificateMaxInputBytes,
+		MaxFileBytes:     certificateMaxInputBytes,
+		MaxExpandedBytes: certificateMaxExpandedBytes,
+		MaxEntries:       certificateMaxEntries,
+		MaxDepth:         certificateMaxDepth,
+		MaxCertificates:  certificateMaxOccurrences,
+		MaxDiagnostics:   certificateMaxDiagnostics,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var signals []Signal
+	for _, certificate := range inventory.Certificates {
+		signals = append(signals, Signal{
+			Check: checkCertificate,
+			Kind:  "identity",
+			Name:  certificate.SHA256,
+			Value: certificateValue(certificate),
+			Path:  filePath,
+		})
+	}
+	for _, collection := range inventory.Collections {
+		location := certificateLocation(collection.Location)
+		if collection.SetSHA256 != "" {
+			signals = append(signals, Signal{
+				Check: checkCertificate,
+				Kind:  "collection",
+				Name:  collection.SetSHA256,
+				Value: "format=" + collection.Format +
+					"; certificates=" + strconv.Itoa(len(collection.Occurrences)) +
+					"; location=" + location,
+				Path: filePath,
+			})
+		}
+		for _, match := range collection.Matches {
+			signals = append(signals, Signal{
+				Check: checkCertificate,
+				Kind:  "reference-match",
+				Name:  match.Name,
+				Value: "kind=" + match.Kind +
+					"; shared=" + strconv.Itoa(match.Shared) +
+					"; missing=" + strconv.Itoa(len(match.Missing)) +
+					"; additional=" + strconv.Itoa(len(match.Additional)) +
+					"; location=" + location +
+					"; source=" + match.Source,
+				Path: filePath,
+			})
+		}
+	}
+	if !inventory.Complete {
+		signals = append(signals, certificateCoverageSignal(filePath, inventory.Diagnostics))
+	}
+	sortSignals(signals)
+	return deduplicateSignals(signals), nil
+}
+
+func certificateCoverageSignal(filePath string, diagnostics []gitcerts.Diagnostic) Signal {
+	counts := make(map[string]int)
+	for _, diagnostic := range diagnostics {
+		code := diagnostic.Code
+		if code == "" {
+			code = "unknown"
+		}
+		counts[code]++
+	}
+	codes := make([]string, 0, len(counts))
+	for code := range counts {
+		codes = append(codes, code)
+	}
+	sort.Strings(codes)
+	parts := make([]string, 0, len(codes))
+	for _, code := range codes {
+		parts = append(parts, code+"="+strconv.Itoa(counts[code]))
+	}
+	return Signal{
+		Check: checkCertificate,
+		Kind:  certificateCoverageKind,
+		Name:  "incomplete",
+		Value: strings.Join(parts, "; "),
+		Path:  filePath,
+	}
+}
+
+func certificateValue(certificate gitcerts.Certificate) string {
+	return "spki=" + certificate.SPKISHA256 +
+		"; subject=" + certificateName(certificate.Subject) +
+		"; issuer=" + certificateName(certificate.Issuer) +
+		"; not-before=" + certificate.NotBefore.UTC().Format(time.RFC3339) +
+		"; not-after=" + certificate.NotAfter.UTC().Format(time.RFC3339) +
+		"; ca=" + strconv.FormatBool(certificate.IsCA)
+}
+
+func certificateName(value string) string {
+	if strings.IndexFunc(value, unicode.IsControl) >= 0 {
+		return strconv.Quote(value)
+	}
+	return value
+}
+
+func certificateLocation(location []gitcerts.Member) string {
+	parts := make([]string, 0, len(location))
+	for _, member := range location {
+		part := member.Path
+		if member.Entry > 0 {
+			part += "#" + strconv.Itoa(member.Entry)
+		}
+		parts = append(parts, part)
+	}
+	return certificateName(strings.Join(parts, "!"))
 }
 
 func legalFileKinds(filePath string) (license, notice bool) {
@@ -661,7 +887,7 @@ func (d *localDetectors) runRepositoryFiles(
 	}
 
 	delete(current.errors, detectorRepositoryFiles)
-	checks := []string{checkBinaryArtifacts, checkFuzzing, checkLicense, checkSAST, checkSBOM, checkSecurityPolicy}
+	checks := []string{checkBinaryArtifacts, checkCertificate, checkFuzzing, checkLicense, checkSAST, checkSBOM, checkSecurityPolicy}
 	if forceFull {
 		for _, check := range checks {
 			switch check {
