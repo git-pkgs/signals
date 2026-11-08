@@ -17,6 +17,7 @@ const (
 	checkSAST                 = "SAST"
 	checkSBOM                 = "SBOM"
 	checkSecurityPolicy       = "Security-Policy"
+	checkSensitiveIgnore      = "Sensitive-Ignore"
 	checkTokenPermissions     = "Token-Permissions"
 	signalKindDeclaration     = "declaration"
 	signalKindFileReference   = "file-reference"
