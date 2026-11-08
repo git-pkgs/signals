@@ -17,7 +17,7 @@ require (
 	github.com/git-pkgs/manifests v0.13.1-0.20261107212808-69ba49d733ae
 	github.com/git-pkgs/reuse v0.2.0
 	github.com/git-pkgs/roles v0.1.3
-	github.com/git-pkgs/sarif v0.1.4-0.20261108175116-14294dee0dad
+	github.com/git-pkgs/sarif v0.1.4-0.20261108184815-c2e53906ee51
 	github.com/git-pkgs/sbom v0.1.10-0.20261107160107-38436af679c6
 	github.com/git-pkgs/secrets v0.2.1-0.20261107154440-a977b8886af8
 	github.com/git-pkgs/skills v0.2.1

@@ -29,6 +29,7 @@ const (
 	testFuzzPath           = "fuzz_test.go"
 	testFuzzerKind         = "fuzzer"
 	testGoFuzzerName       = "GoBuiltInFuzzer"
+	testDocumentKind       = "document"
 	testJSONLFlag          = "--jsonl"
 	testLogCommand         = "log"
 	testPackageName        = "example"
@@ -119,7 +120,7 @@ func TestRepositoryFileSignalsUsesGitPkgsParsers(t *testing.T) {
 }`))
 	if !containsExactSignal(sbomSignals, Signal{
 		Check: checkSBOM,
-		Kind:  "document",
+		Kind:  testDocumentKind,
 		Name:  "cyclonedx",
 		Value: "1.6",
 		Path:  "artifacts/inventory.json",
@@ -297,7 +298,7 @@ func TestRepositoryFileSignalsReportsUnrecognizedSBOMCandidate(t *testing.T) {
 func TestRepositoryFileSignalsSummarizesSARIF(t *testing.T) {
 	signals := repositorySignals(t, testSARIFPath, []byte(testSARIFLog))
 	for _, wanted := range []Signal{
-		{Check: checkSARIF, Kind: "document", Name: "2.1.0", Value: "runs=1; results=2; occurrences=3; suppressed=1", Path: testSARIFPath},
+		{Check: checkSARIF, Kind: testDocumentKind, Name: "2.1.0", Value: "runs=1; results=2; occurrences=3; suppressed=1", Path: testSARIFPath},
 		{Check: checkSARIF, Kind: "tool", Name: "CodeQL", Value: "semantic-version=2.20.0", Path: testSARIFPath},
 		{Check: checkSARIF, Kind: "level", Name: "error", Value: "1", Path: testSARIFPath},
 		{Check: checkSARIF, Kind: "level", Name: "warning", Value: "1", Path: testSARIFPath},
@@ -324,6 +325,19 @@ func TestRepositoryFileSignalsSummarizesSARIF(t *testing.T) {
 	}
 	if signals := repositorySignals(t, "testdata/results.sarif", []byte(testSARIFLog)); len(signals) != 0 {
 		t.Fatalf("fixture SARIF signals = %#v", signals)
+	}
+}
+
+func TestRepositoryFileSignalsReportsTruncatedSARIF(t *testing.T) {
+	data := append([]byte(testSARIFLog), bytes.Repeat([]byte(" "), sarifMaxBytes-len(testSARIFLog)+1)...)
+	signals := repositorySignals(t, testSARIFPath, data)
+	for _, wanted := range []Signal{
+		{Check: checkSARIF, Kind: testDocumentKind, Name: "2.1.0", Value: "runs=1; results=2; occurrences=3; suppressed=1", Path: testSARIFPath},
+		{Check: checkSARIF, Kind: "coverage", Name: "truncated", Path: testSARIFPath},
+	} {
+		if !containsExactSignal(signals, wanted) {
+			t.Errorf("signal missing: %#v\ngot: %#v", wanted, signals)
+		}
 	}
 }
 
