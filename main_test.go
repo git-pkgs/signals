@@ -67,7 +67,7 @@ jobs:
 		"+ Pinned-Dependencies/GitHubAction actions/checkout at .github/workflows/ci.yml = unpinned",
 		"+ Pinned-Dependencies/GitHubAction example/action at .github/workflows/ci.yml = unpinned",
 		"+ SAST/tool CodeQL at .github/workflows/ci.yml",
-		"+ Security-Policy/policy at SECURITY.md:1",
+		testSecurityPolicyAdded,
 		"+ Token-Permissions/topLevel",
 		"Remove security policy",
 		"- Security-Policy/policy at SECURITY.md:1",
@@ -211,6 +211,92 @@ func TestLogUsesBriefSecurityPathDefinitions(t *testing.T) {
 	for _, excluded := range []string{"fixtures/bom.json", "testdata/qodana.yaml"} {
 		if strings.Contains(stdout.String(), excluded) {
 			t.Errorf("output contains fixture evidence %q:\n%s", excluded, stdout.String())
+		}
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected detection errors:\n%s", stderr.String())
+	}
+}
+
+func TestLogDetectsStableSecurityChangelogEntries(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.name", "Signals Test")
+	gitRun(t, repo, "config", "user.email", "signals@example.com")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+
+	writeFile(t, repo, "README.md", "# example\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Initial commit")
+
+	oldEntry := "# 1.0.0\n\n## Security fixes\n\n- Reject unsafe archive paths\n" +
+		"- No security fixes in this release\n" +
+		"\n## 0.9.0 (Security release)\n\n### Added\n\n- Improve parser performance\n" +
+		"\n## Food insecurity data\n\n- Refresh population sample\n"
+	writeFile(t, repo, testChangelogPath, oldEntry)
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Document security hardening")
+
+	writeFile(t, repo, testChangelogPath, "# 1.1.0\n\n## Fixed\n\n- Fix CVE-2026-12345\n\n"+oldEntry)
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Document security advisory")
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"log", testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
+		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
+	}
+	for _, expected := range []string{
+		"+ Security-Changelog/entry at CHANGELOG.md = Reject unsafe archive paths",
+		"+ Security-Changelog/advisory CVE-2026-12345 at CHANGELOG.md = Fix CVE-2026-12345",
+	} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Errorf("output missing %q:\n%s", expected, stdout.String())
+		}
+	}
+	if strings.Contains(stdout.String(), "- Security-Changelog/entry") {
+		t.Fatalf("stable changelog entry was removed after moving down the file:\n%s", stdout.String())
+	}
+	for _, excluded := range []string{
+		"No security fixes in this release",
+		"Improve parser performance",
+		"Refresh population sample",
+	} {
+		if strings.Contains(stdout.String(), excluded) {
+			t.Fatalf("changelog produced evidence for %q:\n%s", excluded, stdout.String())
+		}
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected detection errors:\n%s", stderr.String())
+	}
+}
+
+func TestLogAcceptsLongSecurityChangelogLines(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.name", "Signals Test")
+	gitRun(t, repo, "config", "user.email", "signals@example.com")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+
+	writeFile(t, repo, "README.md", "# Example\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Initial commit")
+
+	longEntry := strings.Repeat("x", 1<<20) + " CVE-2026-12345\n"
+	writeFile(t, repo, testChangelogPath, longEntry)
+	writeFile(t, repo, "SECURITY.md", "# Security policy\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Document security guidance")
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"log", testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
+		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
+	}
+	for _, expected := range []string{
+		"+ Security-Changelog/advisory CVE-2026-12345 at CHANGELOG.md",
+		testSecurityPolicyAdded,
+	} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Errorf("output missing %q:\n%s", expected, stdout.String())
 		}
 	}
 	if stderr.Len() != 0 {

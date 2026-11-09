@@ -116,18 +116,20 @@ type repositoryFileCacheKey struct {
 }
 
 type repositoryPathRules struct {
-	policy *kb.ResourceInfo
-	sbom   *kb.ResourceInfo
-	qodana *kb.ToolDef
-	sonar  *kb.ToolDef
+	changelog *kb.ResourceInfo
+	policy    *kb.ResourceInfo
+	sbom      *kb.ResourceInfo
+	qodana    *kb.ToolDef
+	sonar     *kb.ToolDef
 }
 
 func newRepositoryPathRules(knowledge *kb.KnowledgeBase) *repositoryPathRules {
 	return &repositoryPathRules{
-		policy: knowledge.Resource("security", "policy"),
-		sbom:   knowledge.Resource("metadata", "sbom"),
-		qodana: knowledge.ByName["Qodana"],
-		sonar:  knowledge.ByName["SonarQube"],
+		changelog: knowledge.Resource("", "changelog"),
+		policy:    knowledge.Resource("security", "policy"),
+		sbom:      knowledge.Resource("metadata", "sbom"),
+		qodana:    knowledge.ByName["Qodana"],
+		sonar:     knowledge.ByName["SonarQube"],
 	}
 }
 
@@ -265,6 +267,12 @@ func repositoryFileSignalsFromFS(
 		}
 		signals = append(signals, parsed...)
 	}
+
+	parsed, err := repositoryChangelogSignals(tree, filePath, rules)
+	if err != nil {
+		return nil, err
+	}
+	signals = append(signals, parsed...)
 
 	if fuzzingFile(filePath) {
 		parsed, err := scanRepositoryFile(tree, filePath, func(reader io.Reader) ([]Signal, error) {
@@ -890,6 +898,20 @@ func (rules *repositoryPathRules) securityPolicyPath(filePath string) bool {
 		rules != nil && rules.policy != nil && rules.policy.MatchesPath(filePath)
 }
 
+func (rules *repositoryPathRules) changelogPath(filePath string) bool {
+	return repositoryProjectEvidencePath(filePath) &&
+		rules != nil && rules.changelog != nil && rules.changelog.MatchesPath(filePath)
+}
+
+func repositoryChangelogSignals(tree fs.FS, filePath string, rules *repositoryPathRules) ([]Signal, error) {
+	if !rules.changelogPath(filePath) {
+		return nil, nil
+	}
+	return scanRepositoryFile(tree, filePath, func(reader io.Reader) ([]Signal, error) {
+		return securityChangelogSignals(filePath, reader)
+	})
+}
+
 func securityPolicySignals(filePath string, reader io.Reader) ([]Signal, error) {
 	signals := []Signal{{
 		Check: checkSecurityPolicy,
@@ -1108,7 +1130,10 @@ func (d *localDetectors) runRepositoryFiles(
 	}
 
 	delete(current.errors, detectorRepositoryFiles)
-	checks := []string{checkBinaryArtifacts, checkCertificate, checkFuzzing, checkLicense, checkSARIF, checkSAST, checkSBOM, checkSecurityPolicy}
+	checks := []string{
+		checkBinaryArtifacts, checkCertificate, checkFuzzing, checkLicense, checkSARIF, checkSAST, checkSBOM,
+		checkSecurityChangelog, checkSecurityPolicy,
+	}
 	if forceFull {
 		for _, check := range checks {
 			switch check {

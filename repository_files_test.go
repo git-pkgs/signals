@@ -385,6 +385,22 @@ func TestRepositoryFileSignalsIgnoreBundledSecurityEvidence(t *testing.T) {
 	}
 }
 
+func TestRepositoryFileSignalsUsesBriefChangelogPaths(t *testing.T) {
+	signals := repositorySignals(t, testChangelogPath, []byte("## Security\n\n- "+testSecurityChangelogEntry+"\n"))
+	wanted := Signal{
+		Check: checkSecurityChangelog,
+		Kind:  signalKindChangelogEntry,
+		Value: testSecurityChangelogEntry,
+		Path:  testChangelogPath,
+	}
+	if !containsExactSignal(signals, wanted) {
+		t.Fatalf("signals = %#v", signals)
+	}
+	if signals := repositorySignals(t, "docs/CHANGELOG.md", []byte("Security fix\n")); len(signals) != 0 {
+		t.Fatalf("unconfigured changelog path signals = %#v", signals)
+	}
+}
+
 func TestRepositoryFileSignalsDoesNotTreatSourceNamesAsLegalEvidence(t *testing.T) {
 	for _, filePath := range []string{"notice.go", "licenses/_spdx.py"} {
 		if signals := repositorySignals(t, filePath, []byte("package example\n")); len(signals) != 0 {
@@ -612,7 +628,7 @@ func TestLogDetectsRepositoryFileSignals(t *testing.T) {
 		"+ SARIF/rule js/xss at results.sarif = 1",
 		"+ SARIF/tool CodeQL at results.sarif = semantic-version=2.20.0",
 		"+ SBOM/document cyclonedx at bom.json:1 = 1.6",
-		"+ Security-Policy/policy at SECURITY.md:1",
+		testSecurityPolicyAdded,
 		"+ Security-Policy/email at SECURITY.md:1 = security@example.com",
 		fmt.Sprintf("+ Fuzzing/%s %s at %s:%d", testFuzzerKind, testGoFuzzerName, testFuzzPath, paddingLines+2),
 	} {
