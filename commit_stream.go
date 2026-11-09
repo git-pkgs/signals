@@ -318,17 +318,12 @@ func commitEvents(commit *object.Commit) []jsonlSignal {
 		events = append(events, jsonlSignal{Check: checkDependencyUpdateTool, Kind: "commit", Name: tool})
 	}
 	if commit.Signature != "" || commit.SignatureSHA256 != "" {
-		events = append(events, jsonlSignal{Check: checkSignedCommit, Kind: signatureKind(commit)})
+		events = append(events, jsonlSignal{
+			Check: checkSignedCommit,
+			Kind:  signatureKind(commit.Signature + commit.SignatureSHA256),
+		})
 	}
-	sort.Slice(events, func(i, j int) bool {
-		if events[i].Check != events[j].Check {
-			return events[i].Check < events[j].Check
-		}
-		if events[i].Kind != events[j].Kind {
-			return events[i].Kind < events[j].Kind
-		}
-		return events[i].Name < events[j].Name
-	})
+	sortEventSignals(events)
 	return events
 }
 
@@ -369,8 +364,7 @@ func isBotIdentity(name, email string) bool {
 	return strings.Contains(identity, "[bot]") || dependencyBot(name, email) != ""
 }
 
-func signatureKind(commit *object.Commit) string {
-	signature := commit.Signature + commit.SignatureSHA256
+func signatureKind(signature string) string {
 	switch {
 	case strings.Contains(signature, "BEGIN PGP SIGNATURE"):
 		return "openpgp"
