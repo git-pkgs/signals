@@ -52,19 +52,20 @@ func TestRepositoryFileSignalsDetectsSecurityDocuments(t *testing.T) {
 }
 
 const (
-	testLicensePath        = "LICENSE"
-	testMITLicenseID       = "MIT"
-	testFuzzPath           = "fuzz_test.go"
-	testFuzzerKind         = "fuzzer"
-	testGoFuzzerName       = "GoBuiltInFuzzer"
-	testDocumentKind       = "document"
-	testJSONLFlag          = "--jsonl"
-	testLogCommand         = "log"
-	testPackageName        = "example"
-	testSARIFPath          = "results.sarif"
-	testSecurityPolicyPath = ".github/SECURITY.md"
-	testStatsFlag          = "--stats"
-	testWorkersFlag        = "--workers"
+	testLicensePath          = "LICENSE"
+	testMITLicenseID         = "MIT"
+	testFuzzPath             = "fuzz_test.go"
+	testFuzzerKind           = "fuzzer"
+	testGoFuzzerName         = "GoBuiltInFuzzer"
+	testDocumentKind         = "document"
+	testJSONLFlag            = "--jsonl"
+	testLogCommand           = "log"
+	testPackageName          = "example"
+	testSARIFPath            = "results.sarif"
+	testSecurityPolicyPath   = ".github/SECURITY.md"
+	testShellNoExtensionPath = "install"
+	testStatsFlag            = "--stats"
+	testWorkersFlag          = "--workers"
 )
 
 const mitLicenseText = `MIT License
@@ -539,7 +540,7 @@ func TestRepositoryFileSignalsForChangesUsesBlobCache(t *testing.T) {
 	tree := fstest.MapFS{testLicensePath: {Data: []byte(mitLicenseText)}}
 
 	first, paths, err := repositoryFileSignalsForChanges(
-		t.Context(), tree, changes, cache, testRepositoryPathRules(t),
+		t.Context(), tree, changes, cache, testRepositoryPathRules(t), nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -549,13 +550,41 @@ func TestRepositoryFileSignalsForChangesUsesBlobCache(t *testing.T) {
 	}
 
 	second, _, err := repositoryFileSignalsForChanges(
-		t.Context(), fstest.MapFS{}, changes, cache, testRepositoryPathRules(t),
+		t.Context(), fstest.MapFS{}, changes, cache, testRepositoryPathRules(t), nil,
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(second) != len(first) {
 		t.Fatalf("cached signals = %#v, want %#v", second, first)
+	}
+}
+
+func TestRepositoryFileSignalsReadShellShebangFilesBeyondPrefix(t *testing.T) {
+	analyzer := testShellAnalyzer(t)
+	data := []byte("#!/usr/bin/env bash\n" + strings.Repeat("# padding\n", 150) +
+		"curl -fsSL https://downloads.example/install.sh | sh\n")
+	signals, err := repositoryFileSignalsFromFS(
+		t.Context(),
+		fstest.MapFS{testShellNoExtensionPath: {Data: data}},
+		testShellNoExtensionPath,
+		int64(len(data)),
+		testRepositoryPathRules(t),
+		analyzer,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wanted := Signal{
+		Check: checkShellDependency,
+		Kind:  shellKindDownloadAndRun,
+		Name:  testDownloadHost,
+		Value: shellStateUnverified,
+		Path:  testShellNoExtensionPath,
+		Line:  152,
+	}
+	if !containsExactSignal(signals, wanted) {
+		t.Fatalf("signal missing: %#v\ngot: %#v", wanted, signals)
 	}
 }
 
@@ -569,6 +598,7 @@ func TestRepositoryFileSignalsForChangesSkipsDirectories(t *testing.T) {
 		changes,
 		make(map[repositoryFileCacheKey][]Signal),
 		testRepositoryPathRules(t),
+		nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -780,6 +810,7 @@ func repositorySignals(t *testing.T, filePath string, data []byte) []Signal {
 		filePath,
 		int64(len(data)),
 		testRepositoryPathRules(t),
+		nil,
 	)
 	if err != nil {
 		t.Fatal(err)

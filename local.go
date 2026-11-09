@@ -75,6 +75,7 @@ type localDetectors struct {
 	workflowCache       map[workflowCacheKey][]Signal
 	packageManagers     *packageManagerDetector
 	repositoryPaths     *repositoryPathRules
+	shell               *shellAnalyzer
 	reuseMarkers        map[plumbing.Hash]bool
 }
 
@@ -114,6 +115,7 @@ func newLocalDetectors(ctx context.Context, repo *githistory.Repo) (*localDetect
 		workflowCache:       make(map[workflowCacheKey][]Signal),
 		packageManagers:     packageManagers,
 		repositoryPaths:     repositoryPaths,
+		shell:               newShellAnalyzer(packageManagers.definitions),
 		reuseMarkers:        make(map[plumbing.Hash]bool),
 	}
 	detectors.briefImpact = newBriefImpactReport(knowledge)
