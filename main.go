@@ -22,12 +22,16 @@ func main() {
 
 func run(args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: signals log [options] [repo]")
+		return errors.New("usage: signals <log|summary|diff> [options]")
 	}
 
 	switch args[0] {
 	case "log":
 		return runLog(args[1:], stdout, stderr)
+	case "summary":
+		return runSummary(args[1:], stdout, stderr)
+	case "diff":
+		return runStateDiff(args[1:], stdout, stderr)
 	case "version", "--version", "-version":
 		_, err := fmt.Fprintln(stdout, version)
 		return err
