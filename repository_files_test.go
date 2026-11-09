@@ -52,6 +52,7 @@ func TestRepositoryFileSignalsDetectsSecurityDocuments(t *testing.T) {
 }
 
 const (
+	testAttestationPath      = "provenance.intoto.jsonl"
 	testLicensePath          = "LICENSE"
 	testMITLicenseID         = "MIT"
 	testFuzzPath             = "fuzz_test.go"
@@ -67,6 +68,8 @@ const (
 	testStatsFlag            = "--stats"
 	testWorkersFlag          = "--workers"
 )
+
+const testAttestationStatement = `{"_type":"https://in-toto.io/Statement/v1","subject":[{"name":"dist/example.tar.gz","digest":{"sha256":"0123456789abcdef"}}],"predicateType":"https://slsa.dev/provenance/v1","predicate":{"buildDefinition":{"resolvedDependencies":[{"uri":"git+https://github.com/example/project.git@refs/heads/main","digest":{"gitCommit":"deadbeef"}}]},"runDetails":{"builder":{"id":"https://github.com/example/project/.github/workflows/release.yml@refs/heads/main"}}}}`
 
 const mitLicenseText = `MIT License
 
@@ -351,6 +354,33 @@ func TestRepositoryFileSignalsReportsUnrecognizedSBOMCandidate(t *testing.T) {
 	}
 }
 
+func TestRepositoryFileSignalsDetectsAttestationClaims(t *testing.T) {
+	signals := repositorySignals(t, testAttestationPath, []byte(testAttestationStatement))
+	for _, wanted := range []Signal{
+		{Check: checkAttestation, Kind: "claim", Name: "https://slsa.dev/provenance/v1", Path: testAttestationPath},
+		{Check: checkAttestation, Kind: "builder-claim", Value: "https://github.com/example/project/.github/workflows/release.yml@refs/heads/main", Path: testAttestationPath},
+		{Check: checkAttestation, Kind: "source-claim", Name: "https://github.com/example/project", Value: "deadbeef", Path: testAttestationPath},
+		{Check: checkAttestation, Kind: "subject-claim", Name: "dist/example.tar.gz", Value: "sha256:0123456789abcdef", Path: testAttestationPath},
+	} {
+		if !containsExactSignal(signals, wanted) {
+			t.Errorf("missing %#v in %#v", wanted, signals)
+		}
+	}
+}
+
+func TestRepositoryFileSignalsKeepsMalformedAttestationCandidate(t *testing.T) {
+	signals := repositorySignals(t, "release.sigstore.json", []byte("{not-json"))
+	wanted := Signal{
+		Check: checkAttestation,
+		Kind:  signalKindCandidate,
+		Name:  "malformed",
+		Path:  "release.sigstore.json",
+	}
+	if !containsExactSignal(signals, wanted) {
+		t.Fatalf("signals = %#v", signals)
+	}
+}
+
 func TestRepositoryFileSignalsSummarizesSARIF(t *testing.T) {
 	signals := repositorySignals(t, testSARIFPath, []byte(testSARIFLog))
 	for _, wanted := range []Signal{
@@ -405,6 +435,7 @@ func TestRepositoryFileSignalsIgnoreBundledSecurityEvidence(t *testing.T) {
 		{path: "fixtures/bom.json", data: `{"bomFormat":"CycloneDX","specVersion":"1.6","version":1}`},
 		{path: "testdata/qodana.yaml", data: "version: 1.0\n"},
 		{path: "vendor/example/.sonarcloud.properties", data: "sonar.projectKey=example\n"},
+		{path: "vendor/example/provenance.intoto.jsonl", data: testAttestationStatement},
 	} {
 		if signals := repositorySignals(t, test.path, []byte(test.data)); len(signals) != 0 {
 			t.Errorf("%s signals = %#v", test.path, signals)

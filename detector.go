@@ -7,6 +7,7 @@ import (
 
 const (
 	checkAgentSkill            = "Agent-Skill"
+	checkAttestation           = "Attestation"
 	checkArtifactProvenance    = "Artifact-Provenance"
 	checkArtifactSigning       = "Artifact-Signing"
 	checkBinaryArtifacts       = "Binary-Artifacts"
@@ -25,6 +26,7 @@ const (
 	checkSensitiveIgnore       = "Sensitive-Ignore"
 	checkSubresourceIntegrity  = "Subresource-Integrity"
 	checkTokenPermissions      = "Token-Permissions"
+	signalKindCandidate        = "candidate"
 	signalKindDeclaration      = "declaration"
 	signalKindChangelogEntry   = "entry"
 	signalKindAdvisory         = "advisory"
