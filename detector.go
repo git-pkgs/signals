@@ -16,6 +16,7 @@ const (
 	checkDependencyUpdateTool  = "Dependency-Update-Tool"
 	checkFuzzing               = "Fuzzing"
 	checkLicense               = "License"
+	checkRepositoryOwnership   = "Repository-Ownership"
 	checkSARIF                 = "SARIF"
 	checkSAST                  = "SAST"
 	checkSBOM                  = "SBOM"
