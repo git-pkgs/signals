@@ -174,6 +174,50 @@ jobs:
 	}
 }
 
+func TestLogUsesBriefSecurityPathDefinitions(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.name", "Signals Test")
+	gitRun(t, repo, "config", "user.email", "signals@example.com")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+
+	writeFile(t, repo, "README.md", "# example\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Initial commit")
+
+	writeFile(t, repo, ".gitlab/SECURITY.txt", "Email security@example.com.\n")
+	writeFile(t, repo, "services/api/qodana.yaml", "version: 1.0\n")
+	writeFile(t, repo, "services/web/.sonarcloud.properties", "sonar.projectKey=web\n")
+	writeFile(t, repo, "artifacts/service.spdx.json", "{}\n")
+	writeFile(t, repo, "fixtures/bom.json", `{"bomFormat":"CycloneDX","specVersion":"1.6","version":1}`)
+	writeFile(t, repo, "testdata/qodana.yaml", "version: 1.0\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Add shared security paths")
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"log", testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
+		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
+	}
+	for _, expected := range []string{
+		"+ Security-Policy/policy at .gitlab/SECURITY.txt:1",
+		"+ SAST/tool Qodana at services/api/qodana.yaml:1",
+		"+ SAST/tool Sonar at services/web/.sonarcloud.properties:1",
+		"+ SBOM/candidate service.spdx.json at artifacts/service.spdx.json:1",
+	} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Errorf("output missing %q:\n%s", expected, stdout.String())
+		}
+	}
+	for _, excluded := range []string{"fixtures/bom.json", "testdata/qodana.yaml"} {
+		if strings.Contains(stdout.String(), excluded) {
+			t.Errorf("output contains fixture evidence %q:\n%s", excluded, stdout.String())
+		}
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected detection errors:\n%s", stderr.String())
+	}
+}
+
 func TestLogDetectsDependencyUpdateConfigChanges(t *testing.T) {
 	repo := t.TempDir()
 	gitRun(t, repo, "init", "-b", "main")

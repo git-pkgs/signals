@@ -34,8 +34,8 @@ github.com/git-pkgs/archives v0.10.0 h1:/qgk0MI6VK2sKOoVTd0B4zs5hwTo+St0X8cYYftz
 github.com/git-pkgs/archives v0.10.0/go.mod h1:GJ/h7NPTUYiPinOUxpYNsHFCUikYZcJXvugBvP1VGNc=
 github.com/git-pkgs/bibtex v0.1.0 h1:G855pDj1/+6Vwzq0UufQyRscY1DTgL9P0DfrozkubHU=
 github.com/git-pkgs/bibtex v0.1.0/go.mod h1:6y8kbaIpeP/Ori1v8qy7eEebB+GOCDZYeiG0ylbCpGA=
-github.com/git-pkgs/brief v0.15.1-0.20261107204040-d1ed5a631f83 h1:pYh0jSaKXsNQ29xI0In9booImJl77sn22FjIZiu91ts=
-github.com/git-pkgs/brief v0.15.1-0.20261107204040-d1ed5a631f83/go.mod h1:GLE1nMKaB6Sx8YLem6tiS8QmAUWJ7cx+9UikR6KAvos=
+github.com/git-pkgs/brief v0.15.1-0.20261108084518-18ecb564809a h1:wKtE/InN/p03pL5otz389nD1rhuux+qfgqdYnGcIbFg=
+github.com/git-pkgs/brief v0.15.1-0.20261108084518-18ecb564809a/go.mod h1:GLE1nMKaB6Sx8YLem6tiS8QmAUWJ7cx+9UikR6KAvos=
 github.com/git-pkgs/certs v0.1.1-0.20261104093717-2e1d0e2e0f63 h1:0pZq2n8Hnt4PiAh/FcYJvt7CSSXkabzcjSjRBxd5lVk=
 github.com/git-pkgs/certs v0.1.1-0.20261104093717-2e1d0e2e0f63/go.mod h1:Z3/19hktTIImfV3Ci1W5txzNVzspLS9gqOFTU5CSfMg=
 github.com/git-pkgs/citation v0.1.0 h1:0toQBjxVOtaUsxRtcDJL9uZ6SYFb6IgbHgKpTpP0cv0=
