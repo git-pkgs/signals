@@ -1,6 +1,6 @@
 # signals
 
-A command for tracing security-relevant evidence stored in Git across repository history. It shows when detected evidence appears, changes, or disappears, with the commit and path behind each change. `signals` walks commit trees with [`github.com/git-pkgs/history`](https://github.com/git-pkgs/history). Local parsers detect workflow risks and permissions, artifact-provenance configuration, CI and security tools, threat surface, security documentation, secrets, certificates and trust stores, stored SARIF results, Agent Skills, sensitive ignore policy, REUSE metadata, package managers, manifests, lockfiles, dependency pinning, update configuration, licenses, SBOMs, fuzzers, and binary artifacts. Commit and reference data adds dependency-bot, commit-signature, signed-release, and Gittuf events plus contributor, maintenance, review, and signing metrics. The output contains the evidence and its provenance without calculating a score. The scan reads local Git objects, with forge APIs, release APIs, credential validation, and external services disabled.
+A command for summarizing security-relevant evidence stored in Git, comparing it between revisions, and tracing it across repository history. It shows detected evidence with its commit and path provenance. `signals` reads commit trees with [`github.com/git-pkgs/history`](https://github.com/git-pkgs/history). Local parsers detect workflow risks and permissions, artifact-provenance configuration, CI and security tools, threat surface, security documentation, secrets, certificates and trust stores, stored SARIF results, Agent Skills, sensitive ignore policy, REUSE metadata, package managers, manifests, lockfiles, dependency pinning, update configuration, licenses, SBOMs, fuzzers, and binary artifacts. Commit and reference data adds dependency-bot, commit-signature, signed-release, and Gittuf events plus contributor, maintenance, review, and signing metrics. The output contains the evidence and its provenance without calculating a score. The scan reads local Git objects, with forge APIs, release APIs, credential validation, and external services disabled.
 
 The local-only timeline answers questions about when repository evidence changed. Examples include:
 
@@ -76,6 +76,39 @@ The `log` command accepts these options. Run `signals log --help` to print the s
 --jsonl          write JSON Lines change, event, and snapshot records
 --snapshots      emit signal snapshots at both date boundaries
 ```
+
+## State summaries and direct diffs
+
+`signals summary` scans one commit tree and prints the complete detected state. It uses `HEAD` by default, while `--ref` accepts a branch, tag, or commit SHA. Annotated tags are resolved to their target commit.
+
+```text
+signals summary [--ref REVISION] [--human|--markdown|--json] [repo]
+```
+
+```bash
+./signals summary .
+./signals summary --ref main --markdown .
+./signals summary --ref v1.0.0 --json /path/to/repository
+./signals summary --ref 8f2b7a1 --human /path/to/repository
+```
+
+Text is the default. `--human`, `--markdown`, and `--json` select an output explicitly and cannot be combined. The three formats contain the resolved commit metadata, sorted persistent signals, path and line provenance, and detector errors. Summary output also has a separate events section for evidence attached to the selected commit or current repository refs, including dependency-bot commits, signatures, signed releases, and locally available Gittuf refs. Signature events record presence without verifying trust.
+
+`signals diff` scans two commit trees and compares their complete persistent signal sets directly. It does not walk or print the commits between them:
+
+```text
+signals diff [--human|--markdown|--json] REF1 REF2 [repo]
+```
+
+```bash
+./signals diff main feature-branch .
+./signals diff --markdown v1.0.0 v2.0.0 /path/to/repository
+./signals diff --json 8f2b7a1 c91d04e /path/to/repository
+```
+
+The diff reports added and removed signals with the same fields used by `summary`. Commit-local and repository-ref events are excluded because they are not persistent tree state. Detector errors are reported separately for each revision. The two scans share their blob and detector caches to avoid repeated work for unchanged files.
+
+Flags must precede revisions and repository paths. Run `signals summary --help` or `signals diff --help` for the local flag list.
 
 ## Output
 
