@@ -38,8 +38,8 @@ github.com/git-pkgs/brief v0.15.1-0.20261108084518-18ecb564809a h1:wKtE/InN/p03p
 github.com/git-pkgs/brief v0.15.1-0.20261108084518-18ecb564809a/go.mod h1:GLE1nMKaB6Sx8YLem6tiS8QmAUWJ7cx+9UikR6KAvos=
 github.com/git-pkgs/certs v0.1.1-0.20261104093717-2e1d0e2e0f63 h1:0pZq2n8Hnt4PiAh/FcYJvt7CSSXkabzcjSjRBxd5lVk=
 github.com/git-pkgs/certs v0.1.1-0.20261104093717-2e1d0e2e0f63/go.mod h1:Z3/19hktTIImfV3Ci1W5txzNVzspLS9gqOFTU5CSfMg=
-github.com/git-pkgs/changelog v0.2.2-0.20261108155600-a1922f91e427 h1:vdJ5DANV/EGvTE/DpXmAeUqMGFUmtC3foMiWB8BXYKc=
-github.com/git-pkgs/changelog v0.2.2-0.20261108155600-a1922f91e427/go.mod h1:1pTd3C1pwaBbotiTQk4l+BhGZASYxXVzLWEQKIxclH4=
+github.com/git-pkgs/changelog v0.2.2-0.20261109085623-06e23a4d8810 h1:K5e1s3tnlo3ZNIXty6W9UzEE3XIDfm06eN9+zkX/ZjQ=
+github.com/git-pkgs/changelog v0.2.2-0.20261109085623-06e23a4d8810/go.mod h1:1pTd3C1pwaBbotiTQk4l+BhGZASYxXVzLWEQKIxclH4=
 github.com/git-pkgs/citation v0.1.0 h1:0toQBjxVOtaUsxRtcDJL9uZ6SYFb6IgbHgKpTpP0cv0=
 github.com/git-pkgs/citation v0.1.0/go.mod h1:4vrS78/jjHeusS+eozjP/d3pX2NogEi1R/7gLVqkgqs=
 github.com/git-pkgs/codemeta v0.3.0 h1:zkWndmquCv2tPIHCHb+JXx3eKjmxRoD48f4/3sNAlGw=

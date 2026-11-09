@@ -70,6 +70,45 @@ func TestSecurityChangelogSignalsIgnoresHeadingsAndUnrelatedEntries(t *testing.T
 	}
 }
 
+func TestSecurityChangelogSignalsDoesNotTreatReleaseTitleAsSection(t *testing.T) {
+	t.Parallel()
+
+	signals, err := securityChangelogSignals(testChangelogPath, strings.NewReader(`## 2.0.0 (Security release)
+
+### Added
+
+- Improve parser performance
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(signals) != 0 {
+		t.Fatalf("signals = %#v", signals)
+	}
+}
+
+func TestSecurityChangelogSignalsIgnoresAbsenceOnlyEntry(t *testing.T) {
+	t.Parallel()
+
+	signals, err := securityChangelogSignals(testChangelogPath, strings.NewReader(`## Security
+
+- No security fixes in this release
+- Fix an authentication vulnerability
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Signal{
+		Check: checkSecurityChangelog,
+		Kind:  signalKindChangelogEntry,
+		Value: "Fix an authentication vulnerability",
+		Path:  testChangelogPath,
+	}
+	if len(signals) != 1 || !containsExactSignal(signals, want) {
+		t.Fatalf("signals = %#v, want %#v", signals, want)
+	}
+}
+
 func TestSecurityChangelogSignalsSupportsUnderlinedHeadings(t *testing.T) {
 	t.Parallel()
 

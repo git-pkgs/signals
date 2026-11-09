@@ -15,6 +15,7 @@ var (
 	securityChangelogTermPattern = regexp.MustCompile(`(?i)\b(?:security|vulnerabilit(?:y|ies)|CVE-\d{4}-\d{4,7}|GHSA-[23456789cfghjmpqrvwx]{4}-[23456789cfghjmpqrvwx]{4}-[23456789cfghjmpqrvwx]{4})\b`)
 	securityAdvisoryPattern      = regexp.MustCompile(`(?i)\b(?:CVE-\d{4}-\d{4,7}|GHSA-[23456789cfghjmpqrvwx]{4}-[23456789cfghjmpqrvwx]{4}-[23456789cfghjmpqrvwx]{4})\b`)
 	securitySectionPattern       = regexp.MustCompile(`(?i)\b(?:security|vulnerabilit(?:y|ies))\b`)
+	releaseHeadingPattern        = regexp.MustCompile(`(?i)^(?:(?:release|version)\s+)?(?:\[?unreleased\]?|\[?v?\d+(?:\.\d+){1,3}(?:[-+][0-9a-z.-]+)?\]?)(?:\s|$)`)
 )
 
 func securityChangelogSignals(filePath string, reader io.Reader) ([]Signal, error) {
@@ -87,7 +88,8 @@ func securityAdvisorySignals(filePath, entry string) []Signal {
 }
 
 func securitySectionHeading(heading string) bool {
-	return securitySectionPattern.MatchString(heading)
+	return securitySectionPattern.MatchString(heading) &&
+		!releaseHeadingPattern.MatchString(strings.TrimSpace(heading))
 }
 
 func usefulSecurityChangelogEntry(entry string) bool {
@@ -104,7 +106,8 @@ func usefulSecurityChangelogEntry(entry string) bool {
 
 func usefulChangelogSectionEntry(entry string) bool {
 	switch strings.ToLower(strings.TrimSpace(entry)) {
-	case "", "n/a", "none", "no changes", "no known vulnerabilities", "no security changes":
+	case "", "n/a", "none", "no changes", "no known vulnerabilities", "no security changes",
+		"no security fixes in this release":
 		return false
 	default:
 		return true
