@@ -53,7 +53,7 @@ jobs:
 	gitRun(t, repo, "commit", "-m", "Remove security policy")
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"log", "--workers", "1", repo}, &stdout, &stderr); err != nil {
+	if err := run([]string{testLogCommand, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 
@@ -109,7 +109,7 @@ jobs:
 	gitRun(t, repo, "commit", "-m", "Move workflow lines")
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"log", testJSONLFlag, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
+	if err := run([]string{testLogCommand, testJSONLFlag, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 	output := stdout.String()
@@ -158,7 +158,7 @@ jobs:
 	gitRun(t, repo, "commit", "-m", "Remove build provenance")
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"log", testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
+	if err := run([]string{testLogCommand, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 	for _, expected := range []string{
@@ -237,7 +237,7 @@ func TestLogTracksSecurityDocumentation(t *testing.T) {
 	gitRun(t, repo, "commit", "-m", "Remove audit")
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"log", testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
+	if err := run([]string{testLogCommand, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 	for _, expected := range []string{
@@ -284,7 +284,7 @@ func TestLogUsesBriefSecurityPathDefinitions(t *testing.T) {
 	gitRun(t, repo, "commit", "-m", "Add shared security paths")
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"log", testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
+	if err := run([]string{testLogCommand, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 	for _, expected := range []string{
@@ -331,7 +331,7 @@ func TestLogDetectsStableSecurityChangelogEntries(t *testing.T) {
 	gitRun(t, repo, "commit", "-m", "Document security advisory")
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"log", testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
+	if err := run([]string{testLogCommand, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 	for _, expected := range []string{
@@ -377,7 +377,7 @@ func TestLogAcceptsLongSecurityChangelogLines(t *testing.T) {
 	gitRun(t, repo, "commit", "-m", "Document security guidance")
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"log", testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
+	if err := run([]string{testLogCommand, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 	for _, expected := range []string{
@@ -409,7 +409,7 @@ func TestLogDetectsSubresourceIntegrityChanges(t *testing.T) {
 	gitRun(t, repo, "commit", "-m", "Protect CDN script")
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"log", testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
+	if err := run([]string{testLogCommand, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 	for _, expected := range []string{
@@ -469,7 +469,7 @@ updates:
 	gitRun(t, repo, "commit", "-m", "Configure Scala Steward")
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"log", repo}, &stdout, &stderr); err != nil {
+	if err := run([]string{testLogCommand, repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 
@@ -510,7 +510,7 @@ func TestLogDetectsRenovateInPackageJSON(t *testing.T) {
 	gitRun(t, repo, "commit", "-m", "Configure Renovate")
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"log", repo}, &stdout, &stderr); err != nil {
+	if err := run([]string{testLogCommand, repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 
@@ -572,7 +572,7 @@ func TestLogDetectsPackagePostureChanges(t *testing.T) {
 	gitRun(t, repo, "commit", "-m", "Update exact dependency without lockfile")
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"log", repo}, &stdout, &stderr); err != nil {
+	if err := run([]string{testLogCommand, repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 
@@ -614,7 +614,7 @@ func TestLogDetectsPackageProvenanceChanges(t *testing.T) {
 	gitRun(t, repo, "commit", "-m", "Disable package provenance")
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"log", repo}, &stdout, &stderr); err != nil {
+	if err := run([]string{testLogCommand, repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 	for _, expected := range []string{
@@ -668,7 +668,7 @@ license = "Apache-2.0"
 	gitRun(t, repo, "commit", "-m", "Update licensing")
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"log", "--workers", "1", repo}, &stdout, &stderr); err != nil {
+	if err := run([]string{testLogCommand, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 
@@ -736,7 +736,7 @@ jobs:
 	gitRun(t, repo, "commit", "-m", "Repair workflow")
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"log", testJSONLFlag, testStatsFlag, "--workers", "1", repo}, &stdout, &stderr); err != nil {
+	if err := run([]string{testLogCommand, testJSONLFlag, testStatsFlag, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 
@@ -811,7 +811,7 @@ func TestLogDetectsPackageManagerChanges(t *testing.T) {
 	gitRun(t, repo, "commit", "-m", "Remove Nimble project")
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"log", "--workers", "1", repo}, &stdout, &stderr); err != nil {
+	if err := run([]string{testLogCommand, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 
@@ -854,7 +854,7 @@ func TestLogComparesBranchCommitsWithTheirFirstParent(t *testing.T) {
 	gitRunAt(t, repo, "2016-12-18T00:03:00Z", "merge", "--no-ff", "feature", "-m", "Merge feature")
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"log", "--workers", "1", repo}, &stdout, &stderr); err != nil {
+	if err := run([]string{testLogCommand, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 
@@ -890,7 +890,7 @@ func TestLogUsesLanguagesAndRolesForFuzzing(t *testing.T) {
 	gitRun(t, repo, "commit", "-m", "Add project fuzz target")
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"log", "--workers", "1", repo}, &stdout, &stderr); err != nil {
+	if err := run([]string{testLogCommand, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 
@@ -928,7 +928,7 @@ func TestLogTracksThreatSurfaceAcrossHistory(t *testing.T) {
 	gitRun(t, repo, "commit", "-m", "Remove Rails")
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"log", testJSONLFlag, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
+	if err := run([]string{testLogCommand, testJSONLFlag, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 	var records []jsonlRecord
@@ -980,7 +980,7 @@ func TestLogRequiresConfiguredSecurityToolEvidence(t *testing.T) {
 	gitRun(t, repo, "commit", "-m", "Declare Brakeman")
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"log", testJSONLFlag, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
+	if err := run([]string{testLogCommand, testJSONLFlag, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 	var records []jsonlRecord
@@ -1058,7 +1058,7 @@ func TestLogDetectsLocalToolingSecretsAndREUSEAcrossHistory(t *testing.T) {
 	gitRun(t, repo, "commit", "-m", "Remove local security evidence")
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"log", testJSONLFlag, "--workers", "1", repo}, &stdout, &stderr); err != nil {
+	if err := run([]string{testLogCommand, testJSONLFlag, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 	if strings.Contains(stdout.String(), token) {
@@ -1077,13 +1077,13 @@ func TestLogDetectsLocalToolingSecretsAndREUSEAcrossHistory(t *testing.T) {
 	removed := findJSONLRecord(t, records, "Remove local security evidence")
 
 	expectedAdditions := []jsonlChange{
-		{Change: "added", Check: checkCI, Kind: "GitHub Actions", Path: ".github/workflows/"},
-		{Change: "added", Check: checkPreCommit, Kind: "pre-commit", Path: ".pre-commit-config.yaml"},
-		{Change: "added", Check: checkSecretsManagement, Kind: "SOPS", Path: ".sops.yaml"},
-		{Change: "added", Check: checkSecurityTool, Kind: testSecurityScanKind, Name: testSemgrepName, Path: testSemgrepConfigPath},
-		{Change: "added", Check: checkBuild, Kind: "Make"},
-		{Change: "added", Check: checkSecret, Kind: "github-pat", Value: "[redacted]", Path: "config.yml", Line: 1},
-		{Change: "added", Check: checkREUSE, Kind: "declaration", Value: testMITLicenseID, Path: "licensed.txt"},
+		{Change: testChangeAdded, Check: checkCI, Kind: "GitHub Actions", Path: ".github/workflows/"},
+		{Change: testChangeAdded, Check: checkPreCommit, Kind: "pre-commit", Path: ".pre-commit-config.yaml"},
+		{Change: testChangeAdded, Check: checkSecretsManagement, Kind: "SOPS", Path: ".sops.yaml"},
+		{Change: testChangeAdded, Check: checkSecurityTool, Kind: testSecurityScanKind, Name: testSemgrepName, Path: testSemgrepConfigPath},
+		{Change: testChangeAdded, Check: checkBuild, Kind: "Make"},
+		{Change: testChangeAdded, Check: checkSecret, Kind: "github-pat", Value: "[redacted]", Path: "config.yml", Line: 1},
+		{Change: testChangeAdded, Check: checkREUSE, Kind: "declaration", Value: testMITLicenseID, Path: "licensed.txt"},
 	}
 	for _, expected := range expectedAdditions {
 		if !containsExactJSONLChange(added.Changes, expected) {
@@ -1272,7 +1272,7 @@ func TestLogScansEveryDetectedLanguage(t *testing.T) {
 	gitRun(t, repo, "commit", "-m", "Remove JavaScript")
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"log", "--workers", "1", repo}, &stdout, &stderr); err != nil {
+	if err := run([]string{testLogCommand, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 
@@ -1318,7 +1318,7 @@ func TestLogTracksBriefLanguagesAcrossSymlinkTransitions(t *testing.T) {
 	gitRun(t, repo, "commit", "-m", "Restore Ruby file")
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"log", "--workers", "1", repo}, &stdout, &stderr); err != nil {
+	if err := run([]string{testLogCommand, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 
@@ -1366,7 +1366,7 @@ func TestLogRebuildsLanguagesAtShallowBoundary(t *testing.T) {
 	writeFile(t, repo, ".git/shallow", boundary+"\n")
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"log", testStatsFlag, "--workers", "1", repo}, &stdout, &stderr); err != nil {
+	if err := run([]string{testLogCommand, testStatsFlag, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 
@@ -1397,7 +1397,7 @@ func TestLogRebuildsBriefLanguagesForManifestChanges(t *testing.T) {
 	gitRun(t, repo, "commit", "-m", "Add TypeScript")
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"log", testStatsFlag, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
+	if err := run([]string{testLogCommand, testStatsFlag, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 
@@ -1429,7 +1429,7 @@ func TestLogWritesJSONL(t *testing.T) {
 	gitRunAt(t, repo, "2024-02-01T12:00:00Z", "commit", "-m", "Add security policy")
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"log", testJSONLFlag, "--workers", "1", repo}, &stdout, &stderr); err != nil {
+	if err := run([]string{testLogCommand, testJSONLFlag, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 
@@ -1501,12 +1501,12 @@ func TestLogWritesBoundarySnapshots(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	if err := run([]string{
-		"log",
+		testLogCommand,
 		testJSONLFlag,
-		"--snapshots",
-		"--after", "2024-02-01",
-		"--before", "2024-03-01",
-		"--workers", "1",
+		testSnapshotsFlag,
+		testAfterFlag, testAfterDate,
+		testBeforeFlag, testBeforeDate,
+		testWorkersFlag, "1",
 		repo,
 	}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
@@ -1528,7 +1528,7 @@ func TestLogWritesBoundarySnapshots(t *testing.T) {
 		t.Fatalf("decode end snapshot: %v", err)
 	}
 
-	if start.Type != "snapshot" || start.Boundary != "start" || start.Date != "2024-02-01" {
+	if start.Type != testSnapshotRecordType || start.Boundary != "start" || start.Date != testAfterDate {
 		t.Errorf("start snapshot metadata = %#v", start)
 	}
 	if start.Author == nil || start.Author.Name != "Signals Test" || start.Author.Email != "signals@example.com" {
@@ -1540,7 +1540,7 @@ func TestLogWritesBoundarySnapshots(t *testing.T) {
 	if change.Type != "change" || change.Subject != "Remove policy after funding" {
 		t.Errorf("change record = %#v", change)
 	}
-	if end.Type != "snapshot" || end.Boundary != "end" || end.Date != "2024-03-01" {
+	if end.Type != testSnapshotRecordType || end.Boundary != "end" || end.Date != testBeforeDate {
 		t.Errorf("end snapshot metadata = %#v", end)
 	}
 	if containsJSONLSignal(end.Signals, checkSecurityPolicy, "SECURITY.md") {
@@ -1584,10 +1584,10 @@ func TestLogFiltersOutputByCommitterDateWithoutDiscardingEarlierState(t *testing
 
 	var stdout, stderr bytes.Buffer
 	if err := run([]string{
-		"log",
-		"--after", "2024-02-01",
-		"--before", "2024-03-01",
-		"--workers", "1",
+		testLogCommand,
+		testAfterFlag, testAfterDate,
+		testBeforeFlag, testBeforeDate,
+		testWorkersFlag, "1",
 		repo,
 	}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
@@ -1618,22 +1618,22 @@ func TestRunRejectsInvalidDates(t *testing.T) {
 	}{
 		{
 			name: "after format",
-			args: []string{"log", "--after", "2024/02/01"},
+			args: []string{testLogCommand, testAfterFlag, "2024/02/01"},
 			want: `invalid --after date "2024/02/01": use YYYY-MM-DD`,
 		},
 		{
 			name: "before format",
-			args: []string{"log", "--before", "tomorrow"},
+			args: []string{testLogCommand, testBeforeFlag, "tomorrow"},
 			want: `invalid --before date "tomorrow": use YYYY-MM-DD`,
 		},
 		{
 			name: "empty range",
-			args: []string{"log", "--after", "2024-02-01", "--before", "2024-02-01"},
+			args: []string{testLogCommand, testAfterFlag, testAfterDate, testBeforeFlag, testAfterDate},
 			want: "after date must be earlier than before date",
 		},
 		{
 			name: "snapshots without range",
-			args: []string{"log", "--snapshots"},
+			args: []string{testLogCommand, testSnapshotsFlag},
 			want: "snapshots require both --after and --before",
 		},
 	}
@@ -1649,7 +1649,7 @@ func TestRunRejectsInvalidDates(t *testing.T) {
 }
 
 func TestRunRejectsInvalidWorkers(t *testing.T) {
-	err := run([]string{"log", "--workers", "0"}, &bytes.Buffer{}, &bytes.Buffer{})
+	err := run([]string{testLogCommand, testWorkersFlag, "0"}, &bytes.Buffer{}, &bytes.Buffer{})
 	if err == nil || err.Error() != "workers must be positive" {
 		t.Fatalf("got %v", err)
 	}
@@ -1672,10 +1672,10 @@ func TestRunPropagatesWriterErrors(t *testing.T) {
 		stderr io.Writer
 	}{
 		{name: "version", args: []string{"version"}, stdout: failingWriter{}, stderr: io.Discard},
-		{name: "text", args: []string{"log", repo}, stdout: failingWriter{}, stderr: io.Discard},
-		{name: "JSONL", args: []string{"log", testJSONLFlag, repo}, stdout: failingWriter{}, stderr: io.Discard},
-		{name: "progress", args: []string{"log", "--progress", "1", repo}, stdout: io.Discard, stderr: failingWriter{}},
-		{name: "stats", args: []string{"log", testStatsFlag, repo}, stdout: io.Discard, stderr: failingWriter{}},
+		{name: "text", args: []string{testLogCommand, repo}, stdout: failingWriter{}, stderr: io.Discard},
+		{name: "JSONL", args: []string{testLogCommand, testJSONLFlag, repo}, stdout: failingWriter{}, stderr: io.Discard},
+		{name: "progress", args: []string{testLogCommand, "--progress", "1", repo}, stdout: io.Discard, stderr: failingWriter{}},
+		{name: "stats", args: []string{testLogCommand, testStatsFlag, repo}, stdout: io.Discard, stderr: failingWriter{}},
 	}
 
 	for _, test := range tests {

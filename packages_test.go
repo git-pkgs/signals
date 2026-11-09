@@ -67,7 +67,7 @@ func TestManifestLicenseExpressionSignalsClassifyDeclarations(t *testing.T) {
 		{name: "strict", declaration: "MIT OR Apache-2.0", kind: licenseExpressionKind, expression: "MIT OR Apache-2.0", status: licenseExpressionStrict},
 		{name: "future identifier", declaration: "Future-License-1.0 OR MIT", kind: licenseExpressionKind, expression: "Future-License-1.0 OR MIT", status: licenseExpressionSyntax},
 		{name: "informal", declaration: "Apache 2", kind: licenseExpressionKind, expression: "Apache-2.0", status: licenseExpressionNormalized},
-		{name: "invalid", declaration: "SEE LICENSE IN COPYING", kind: licenseExpressionInvalid, expression: "SEE LICENSE IN COPYING"},
+		{name: signalInvalid, declaration: "SEE LICENSE IN COPYING", kind: licenseExpressionInvalid, expression: "SEE LICENSE IN COPYING"},
 	}
 
 	for _, test := range tests {

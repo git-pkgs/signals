@@ -140,7 +140,7 @@ func packageFileSignals(path string, data []byte) []Signal {
 				Check: checkPackageParse,
 				Kind:  string(match.Kind),
 				Name:  match.Ecosystem,
-				Value: "invalid",
+				Value: signalInvalid,
 				Path:  path,
 			})
 		}

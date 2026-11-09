@@ -52,7 +52,12 @@ func TestRepositoryFileSignalsDetectsSecurityDocuments(t *testing.T) {
 }
 
 const (
+	testAfterFlag            = "--after"
+	testAfterDate            = "2024-02-01"
 	testAttestationPath      = "provenance.intoto.jsonl"
+	testBeforeFlag           = "--before"
+	testBeforeDate           = "2024-03-01"
+	testChangeAdded          = "added"
 	testLicensePath          = "LICENSE"
 	testMITLicenseID         = "MIT"
 	testFuzzPath             = "fuzz_test.go"
@@ -65,6 +70,8 @@ const (
 	testSARIFPath            = "results.sarif"
 	testSecurityPolicyPath   = ".github/SECURITY.md"
 	testShellNoExtensionPath = "install"
+	testSnapshotRecordType   = "snapshot"
+	testSnapshotsFlag        = "--snapshots"
 	testStatsFlag            = "--stats"
 	testWorkersFlag          = "--workers"
 )
@@ -404,7 +411,7 @@ func TestRepositoryFileSignalsSummarizesSARIF(t *testing.T) {
 	if !containsExactSignal(invalid, Signal{
 		Check: checkSARIF,
 		Kind:  "candidate",
-		Name:  "invalid",
+		Name:  sarifInvalidName,
 		Path:  "invalid.sarif.json",
 	}) {
 		t.Fatalf("invalid SARIF signals = %#v", invalid)

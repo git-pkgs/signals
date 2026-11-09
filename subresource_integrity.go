@@ -95,7 +95,7 @@ func subresourceIntegritySignal(filePath string, token html.Token) (Signal, bool
 	}
 	parsed, err := integrity.ParseSRI(metadata)
 	if err != nil {
-		return Signal{Check: checkSubresourceIntegrity, Kind: "invalid", Name: url, Path: filePath}, true
+		return Signal{Check: checkSubresourceIntegrity, Kind: signalInvalid, Name: url, Path: filePath}, true
 	}
 	return Signal{
 		Check: checkSubresourceIntegrity,

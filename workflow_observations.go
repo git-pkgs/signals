@@ -19,6 +19,7 @@ const (
 	workflowObservationJobLevel = "jobLevel"
 	packagingKindPackage        = "package"
 	packagingKindPublish        = "publish"
+	packagingNameCargo          = "cargo"
 	packagingNameNPM            = "npm"
 	packagingNameContainer      = "container image"
 	packagingNameGoReleaser     = "GoReleaser"
@@ -309,11 +310,11 @@ func packagingCommand(fields []string) (string, string) {
 			return packagingVerb(command, args[1], "pack", "publish")
 		}
 		return packagingVerb(command, args[0], "pack", "publish")
-	case "cargo":
-		return packagingVerb("cargo", args[0], "package", "publish")
+	case packagingNameCargo:
+		return packagingVerb(packagingNameCargo, args[0], "package", "publish")
 	case "gem":
 		return packagingVerb("RubyGems", args[0], buildName, "push")
-	case "python", "python3", "py":
+	case commandNamePython, commandNamePython3, "py":
 		return pythonPackagingCommand(args)
 	case "twine":
 		if args[0] == "upload" {
@@ -371,7 +372,7 @@ func unwrapCommand(fields []string) []string {
 			fields = fields[1:]
 			continue
 		}
-		if fields[0] == "sudo" || fields[0] == "env" {
+		if fields[0] == commandNameSudo || fields[0] == commandNameEnv {
 			fields = fields[1:]
 			continue
 		}

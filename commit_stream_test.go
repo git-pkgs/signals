@@ -36,7 +36,7 @@ func TestLogWritesCommitEvents(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	if err := run([]string{
-		"log", testJSONLFlag, "--after", "2024-02-01", "--before", "2024-03-01", repo,
+		testLogCommand, testJSONLFlag, testAfterFlag, testAfterDate, testBeforeFlag, testBeforeDate, repo,
 	}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
@@ -96,8 +96,8 @@ func TestLogSnapshotsIncludeCommitMetrics(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	if err := run([]string{
-		"log", testJSONLFlag, "--snapshots",
-		"--after", "2024-02-01", "--before", "2024-03-01", repo,
+		testLogCommand, testJSONLFlag, testSnapshotsFlag,
+		testAfterFlag, testAfterDate, testBeforeFlag, testBeforeDate, repo,
 	}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
@@ -145,8 +145,8 @@ func TestLogSnapshotsHandleNonMonotonicCommitterDates(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	if err := run([]string{
-		"log", testJSONLFlag, "--snapshots",
-		"--after", "2024-04-10", "--before", "2024-05-01", repo,
+		testLogCommand, testJSONLFlag, testSnapshotsFlag,
+		testAfterFlag, "2024-04-10", testBeforeFlag, "2024-05-01", repo,
 	}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
@@ -182,7 +182,7 @@ func TestLogFormatsTextCommitDatesInUTC(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	if err := run([]string{
-		"log", "--snapshots", "--after", "2024-02-01", "--before", "2024-02-02", repo,
+		testLogCommand, testSnapshotsFlag, testAfterFlag, testAfterDate, testBeforeFlag, "2024-02-02", repo,
 	}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
@@ -243,11 +243,19 @@ func TestDependencyBotRecognizesHistoricalDependabotIdentity(t *testing.T) {
 func TestCommitStreamEvictsOutsideOrderAndKeepsRepositoryAge(t *testing.T) {
 	stream := newCommitStream(mailmap.New())
 	stream.addEntry(commitEntry(stream.mailmap, testCommitAt(t, "2024-04-02T00:00:00Z", "Bob", "bob@example.org", "Recent commit")))
-	stream.addEntry(commitEntry(stream.mailmap, testCommitAt(t, "2024-01-01T00:00:00Z", "Alice", "alice@example.org", "Initial commit")))
+	old := testCommitAt(
+		t, "2024-01-01T00:00:00Z", "Alice", "alice@example.org",
+		"Initial commit\n\nReviewed-by: Carol <carol@example.org>",
+	)
+	old.Signature = "signed"
+	stream.addEntry(commitEntry(stream.mailmap, old))
 
 	metrics := stream.metricsAt(mustTime(t, "2024-04-03T00:00:00Z"))
 	assertCountMetric(t, metrics, checkMaintained, "commits", "", 1)
 	assertCountMetric(t, metrics, checkContributors, "non-bot-authors", "", 1)
+	assertCountMetric(t, metrics, checkCodeReview, "reviewed-by", "", 0)
+	assertRatioMetric(t, metrics, checkCodeReview, "proxy-ratio", 0, 1)
+	assertRatioMetric(t, metrics, checkSignedCommit, "presence-ratio", 0, 1)
 	assertDaysMetric(t, metrics, "days-since-commit", 1)
 	assertDaysMetric(t, metrics, "repository-age", 93)
 }
@@ -356,7 +364,7 @@ func decodeSnapshots(t *testing.T, output []byte) []jsonlSnapshotRecord {
 		if err := decoder.Decode(&record); err != nil {
 			t.Fatal(err)
 		}
-		if record.Type == "snapshot" {
+		if record.Type == testSnapshotRecordType {
 			snapshots = append(snapshots, record)
 		}
 	}

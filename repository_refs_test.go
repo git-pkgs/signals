@@ -9,8 +9,6 @@ import (
 	"time"
 )
 
-const testRepositoryRefsLogCommand = "log"
-
 func TestLogWritesSignedReleaseAndGittufEvents(t *testing.T) {
 	repo := t.TempDir()
 	gitRun(t, repo, "init", "-b", "main")
@@ -42,7 +40,7 @@ func TestLogWritesSignedReleaseAndGittufEvents(t *testing.T) {
 	gitRun(t, repo, "update-ref", gittufRSLRef, rslTip)
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{testRepositoryRefsLogCommand, testJSONLFlag, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
+	if err := run([]string{testLogCommand, testJSONLFlag, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 
@@ -102,7 +100,7 @@ RSL Reference Entry
 	}
 	gitRun(t, repo, "update-ref", gittufRSLRef, strings.TrimSpace(string(output)))
 	if err := run([]string{
-		testRepositoryRefsLogCommand, "--ref", "v0.8.0", testJSONLFlag, testWorkersFlag, "1", repo,
+		testLogCommand, "--ref", "v0.8.0", testJSONLFlag, testWorkersFlag, "1", repo,
 	}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log at annotated tag: %v\nstderr:\n%s", err, stderr.String())
 	}

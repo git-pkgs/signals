@@ -183,15 +183,10 @@ func (d *localDetectors) detect(
 	managerFull := forceFull || parent.errors[detectorPackageManagers] != ""
 	managerRun := managerFull || managerImpactErr != nil || len(managerDirectories) > 0
 	secretFull := forceFull || parent.errors[checkSecret] != ""
-	reuseFull := forceFull || parent.errors[checkREUSE] != "" || reuseMetadataChanged(changes)
-	if !reuseFull && !parent.reuseActive {
-		var err error
-		reuseFull, err = d.reuseChangeMayActivate(changes)
-		if err != nil {
-			return commitState{}, err
-		}
+	reuseFull, reuseRun, err := d.reuseScanMode(parent, changes, forceFull)
+	if err != nil {
+		return commitState{}, err
 	}
-	reuseRun := reuseFull || parent.reuseActive && len(changes) > 0
 
 	var tree fs.FS
 	if anyDetectorRuns(agentSkillRun, briefRun, dependencyUpdateRun, packageRun, repositoryFileRun, sensitiveIgnoreRun, workflowRun, managerRun, reuseRun) {
@@ -221,6 +216,22 @@ func (d *localDetectors) detect(
 	d.runSecrets(ctx, commit, changes, secretFull, &current, stats)
 	d.runREUSE(tree, changes, reuseRun, reuseFull, &current, stats)
 	return current, nil
+}
+
+func (d *localDetectors) reuseScanMode(
+	parent commitState,
+	changes []githistory.Change,
+	forceFull bool,
+) (bool, bool, error) {
+	full := forceFull || parent.errors[checkREUSE] != "" || reuseMetadataChanged(changes)
+	if !full && !parent.reuseActive {
+		var err error
+		full, err = d.reuseChangeMayActivate(changes)
+		if err != nil {
+			return false, false, err
+		}
+	}
+	return full, full || parent.reuseActive && len(changes) > 0, nil
 }
 
 func (d *localDetectors) runAgentSkills(

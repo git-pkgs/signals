@@ -151,7 +151,7 @@ func inlineEnvValue(fields []string, name string) (string, bool) {
 	var result string
 	var found bool
 	for _, field := range fields {
-		if field == "env" || field == "sudo" {
+		if field == commandNameEnv || field == commandNameSudo {
 			continue
 		}
 		key, value, ok := strings.Cut(field, "=")
