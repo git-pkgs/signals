@@ -50,6 +50,8 @@ github.com/git-pkgs/gitignore v1.3.1-0.20261108194038-d09d5ccc19b9 h1:+1HyWVLjMC
 github.com/git-pkgs/gitignore v1.3.1-0.20261108194038-d09d5ccc19b9/go.mod h1:zleLGZ4PhQrUXrJSsVQWKoeEllEjJH49+DjyKpzIFPM=
 github.com/git-pkgs/history v0.2.0 h1:UCbrp/PX6rfLukUCRnYme8PtyCqKO8Q5wrpDUY0SOTE=
 github.com/git-pkgs/history v0.2.0/go.mod h1:DaoJasfycHYLtwr8ZTDp7PDnU8WMjAqmadHgJDqAO4A=
+github.com/git-pkgs/integrity v0.2.0 h1:sxpAk7EUllZnTYttOoPTW/Yfe5J2imglpuJiuBUZOxM=
+github.com/git-pkgs/integrity v0.2.0/go.mod h1:vPLb2RB+hR/iCMIgqph0PZbQ7iktXDTK+uupoHQikKk=
 github.com/git-pkgs/languages v0.1.0 h1:Y7bwb86k9DgagCJn3bXW6+8lOtwayDD17Np2usEPooY=
 github.com/git-pkgs/languages v0.1.0/go.mod h1:1ySIOX1MKPvzd4HnByjzxfF2lMw6VY1M8ZjAfGwPDp0=
 github.com/git-pkgs/licenses v0.10.1-0.20261107154534-00c5bf03ade8 h1:zT8x522Q2ldx0AexnfXNXI3FmPphc8m+430ha3eDTIQ=

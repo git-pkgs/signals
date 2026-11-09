@@ -356,6 +356,39 @@ func TestLogAcceptsLongSecurityChangelogLines(t *testing.T) {
 	}
 }
 
+func TestLogDetectsSubresourceIntegrityChanges(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.name", "Signals Test")
+	gitRun(t, repo, "config", "user.email", "signals@example.com")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+
+	writeFile(t, repo, "index.html", `<script src="`+testCDNScript+`"></script>`)
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Load CDN script")
+
+	writeFile(t, repo, "index.html", `<script src="`+testCDNScript+`" integrity="`+testSRI+`"></script>`)
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "Protect CDN script")
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"log", testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
+		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
+	}
+	for _, expected := range []string{
+		"+ Subresource-Integrity/missing " + testCDNScript + " at index.html",
+		"+ Subresource-Integrity/protected " + testCDNScript + " at index.html = " + testSRI,
+		"- Subresource-Integrity/missing " + testCDNScript + " at index.html",
+	} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Errorf("output missing %q:\n%s", expected, stdout.String())
+		}
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected detection errors:\n%s", stderr.String())
+	}
+}
+
 func TestLogDetectsDependencyUpdateConfigChanges(t *testing.T) {
 	repo := t.TempDir()
 	gitRun(t, repo, "init", "-b", "main")

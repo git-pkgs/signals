@@ -21,6 +21,7 @@ const (
 	checkSecurityDocumentation = "Security-Documentation"
 	checkSecurityPolicy        = "Security-Policy"
 	checkSensitiveIgnore       = "Sensitive-Ignore"
+	checkSubresourceIntegrity  = "Subresource-Integrity"
 	checkTokenPermissions      = "Token-Permissions"
 	signalKindDeclaration      = "declaration"
 	signalKindChangelogEntry   = "entry"
