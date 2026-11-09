@@ -25,6 +25,32 @@ import (
 	githistory "github.com/git-pkgs/history"
 )
 
+func TestRepositoryFileSignalsDetectsSecurityDocuments(t *testing.T) {
+	tests := []struct {
+		path string
+		kind string
+	}{
+		{path: "docs/design/THREAT_MODEL.md", kind: "threat-model"},
+		{path: "SECURITY-AUDIT.md", kind: "audit"},
+		{path: ".github/DISCLOSURE.adoc", kind: "disclosure"},
+	}
+	for _, test := range tests {
+		signals := repositorySignals(t, test.path, []byte("security documentation\n"))
+		if !containsExactSignal(signals, Signal{
+			Check: checkSecurityDocumentation,
+			Kind:  test.kind,
+			Path:  test.path,
+		}) {
+			t.Errorf("%s signals = %#v", test.path, signals)
+		}
+	}
+	for _, filePath := range []string{"docs/cli/audit.md", "vendor/dependency/THREAT_MODEL.md"} {
+		if signals := repositorySignals(t, filePath, []byte("not project security documentation\n")); len(signals) != 0 {
+			t.Errorf("%s signals = %#v", filePath, signals)
+		}
+	}
+}
+
 const (
 	testLicensePath        = "LICENSE"
 	testMITLicenseID       = "MIT"
