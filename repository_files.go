@@ -379,6 +379,13 @@ func repositoryStructuredSignals(
 	filePath string,
 	rules *repositoryPathRules,
 ) ([]Signal, error) {
+	if goreleaserConfigPath(filePath) {
+		data, err := readRepositoryFile(tree, filePath, repositoryFileContentBytes)
+		if err != nil {
+			return nil, err
+		}
+		return goreleaserSignals(filePath, data), nil
+	}
 	if sarifFilePath(filePath) {
 		return scanRepositoryFile(tree, filePath, func(reader io.Reader) ([]Signal, error) {
 			return sarifSignals(filePath, reader)
@@ -1215,7 +1222,8 @@ func (d *localDetectors) runRepositoryFiles(
 
 	delete(current.errors, detectorRepositoryFiles)
 	checks := []string{
-		checkBinaryArtifacts, checkCertificate, checkFuzzing, checkLicense, checkSARIF, checkSAST, checkSBOM,
+		checkArtifactSigning, checkBinaryArtifacts, checkCertificate, checkFuzzing, checkLicense, checkSARIF,
+		checkSAST, checkSBOM, checkSBOMGeneration,
 		checkSecurityChangelog, checkSecurityDocumentation, checkSecurityPolicy, checkShellDependency,
 		checkSubresourceIntegrity,
 	}

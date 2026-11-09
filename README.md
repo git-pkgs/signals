@@ -17,7 +17,7 @@ The local-only timeline answers questions about when repository evidence changed
 
 Git retains deleted configuration, earlier licensing coverage, embedded commit signatures, canonical author identities, and the exact commit that introduced or removed a file-backed practice. The same local scan works across hosting services and avoids API rate limits. Blob IDs and changed paths allow results to be reused across thousands of commits.
 
-Some security state exists only on the hosting service or in an external dataset. Branch protection, webhooks, issue activity, successful CI runs, release assets, vulnerability databases, and external registries require separate sources. Review patterns in commit metadata do not prove that a pull request was approved, signature presence does not prove verification, and recent commits do not show whether a repository is marked as archived. Removing a credential from the tree does not remove its blob from Git history or show that it was revoked. Scorecard remains useful for current forge configuration and external evidence, while `signals` supplies the repository history those sources cannot reconstruct.
+Some security state exists only on the hosting service or in an external dataset. Branch protection, webhooks, issue activity, successful CI runs, release assets, vulnerability databases, and external registries require separate sources. Review patterns in commit metadata do not prove that a pull request was approved, signature presence does not prove verification, and release configuration does not prove that signing or SBOM generation completed. Recent commits also do not show whether a repository is marked as archived. Removing a credential from the tree does not remove its blob from Git history or show that it was revoked. Scorecard remains useful for current forge configuration and external evidence, while `signals` supplies the repository history those sources cannot reconstruct.
 
 ## Install
 
@@ -165,6 +165,8 @@ The additional detectors use the same persistent signal model. A threat-surface 
 | REUSE | Per-file SPDX license declarations, REUSE.toml or DEP5 metadata, and the number of non-empty covered files with both license and copyright information |
 | Security-Changelog | CVE and GHSA references, security-related entries, and list entries under security sections in changelog files recognized by Brief |
 | Security-Documentation | Threat models, security audit or review files, and disclosure documents matched by Brief resource definitions outside bundled or derived paths |
+| Artifact-Signing | GoReleaser artifact, container, binary, and native package signing configuration, including the mechanism, artifact type, and selected IDs |
+| SBOM-Generation | GoReleaser SBOM generation configuration, including the command, artifact type, and selected IDs |
 
 ## History scanning
 
