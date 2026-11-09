@@ -29,7 +29,7 @@ func TestSubresourceIntegritySignals(t *testing.T) {
 	for _, wanted := range []Signal{
 		{Check: checkSubresourceIntegrity, Kind: "protected", Name: testCDNScript, Value: testSRI, Path: testMarkupPath},
 		{Check: checkSubresourceIntegrity, Kind: "missing", Name: "//cdn.example/missing.js", Path: testMarkupPath},
-		{Check: checkSubresourceIntegrity, Kind: "invalid", Name: "https://cdn.example/invalid.js", Path: testMarkupPath},
+		{Check: checkSubresourceIntegrity, Kind: signalInvalid, Name: "https://cdn.example/invalid.js", Path: testMarkupPath},
 		{Check: checkSubresourceIntegrity, Kind: "missing", Name: "https://cdn.example/app.css", Path: testMarkupPath},
 	} {
 		if !containsExactSignal(signals, wanted) {

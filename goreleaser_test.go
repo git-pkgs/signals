@@ -11,9 +11,7 @@ import (
 
 const (
 	testGoReleaserPath          = ".goreleaser.yaml"
-	testGoReleaserChangeAdded   = "added"
 	testGoReleaserChangeRemoved = "removed"
-	testGoReleaserLogCommand    = "log"
 )
 
 func TestGoReleaserSignals(t *testing.T) {
@@ -135,7 +133,7 @@ func TestLogTracksGoReleaserSupplyChainConfiguration(t *testing.T) {
 	gitRun(t, repo, "commit", "-m", "Remove release evidence")
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{testGoReleaserLogCommand, testJSONLFlag, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
+	if err := run([]string{testLogCommand, testJSONLFlag, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 	var records []jsonlRecord
@@ -150,9 +148,9 @@ func TestLogTracksGoReleaserSupplyChainConfiguration(t *testing.T) {
 	changed := findJSONLRecord(t, records, "Change selected release build")
 	removed := findJSONLRecord(t, records, "Remove release evidence")
 	for _, expected := range []jsonlChange{
-		{Change: testGoReleaserChangeAdded, Check: checkArtifactSigning, Kind: goreleaserKindSign, Name: goreleaserGPGCommand, Value: "archive; ids=go", Path: testGoReleaserPath},
-		{Change: testGoReleaserChangeAdded, Check: checkSBOMGeneration, Kind: goreleaserKindSBOM, Name: "syft", Value: "archive; ids=go", Path: testGoReleaserPath},
-		{Change: testGoReleaserChangeAdded, Check: checkArtifactSigning, Kind: goreleaserKindPackageSign, Name: goreleaserNFPMCommand, Value: "deb; id=packages; ids=go", Path: testGoReleaserPath},
+		{Change: testChangeAdded, Check: checkArtifactSigning, Kind: goreleaserKindSign, Name: goreleaserGPGCommand, Value: "archive; ids=go", Path: testGoReleaserPath},
+		{Change: testChangeAdded, Check: checkSBOMGeneration, Kind: goreleaserKindSBOM, Name: "syft", Value: "archive; ids=go", Path: testGoReleaserPath},
+		{Change: testChangeAdded, Check: checkArtifactSigning, Kind: goreleaserKindPackageSign, Name: goreleaserNFPMCommand, Value: "deb; id=packages; ids=go", Path: testGoReleaserPath},
 	} {
 		if !containsExactJSONLChange(added.Changes, expected) {
 			t.Errorf("added record missing %#v:\n%s", expected, stdout.String())

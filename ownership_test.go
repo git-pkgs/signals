@@ -11,9 +11,8 @@ import (
 )
 
 const (
-	testCodeownersPath      = ".gitlab/CODEOWNERS"
-	testMaintainersPath     = "MAINTAINERS.md"
-	testOwnershipLogCommand = "log"
+	testCodeownersPath  = ".gitlab/CODEOWNERS"
+	testMaintainersPath = "MAINTAINERS.md"
 )
 
 func TestRepositoryOwnershipSignals(t *testing.T) {
@@ -142,7 +141,7 @@ func TestLogTracksRepositoryOwnershipChanges(t *testing.T) {
 	gitRun(t, repo, "commit", "-m", "Remove ownership")
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{testOwnershipLogCommand, testJSONLFlag, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
+	if err := run([]string{testLogCommand, testJSONLFlag, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 	var records []jsonlRecord

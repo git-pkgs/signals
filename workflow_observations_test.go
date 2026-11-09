@@ -136,7 +136,7 @@ jobs:
 	for _, wanted := range []Signal{
 		{Check: checkRunnerSelection, Kind: runnerKindSelfHosted, Name: "Private runner", Value: "Linux,X64,self-hosted", Path: testWorkflowPath},
 		{Check: checkRunnerSelection, Kind: runnerKindGroup, Name: "grouped", Value: "secure-runners", Path: testWorkflowPath},
-		{Check: checkRunnerSelection, Kind: runnerKindDynamic, Name: "dynamic", Value: "expression:matrix.runner", Path: testWorkflowPath},
+		{Check: checkRunnerSelection, Kind: runnerKindDynamic, Name: runnerKindDynamic, Value: "expression:matrix.runner", Path: testWorkflowPath},
 	} {
 		if !hasWorkflowSignal(signals, wanted) {
 			t.Errorf("signal missing: %#v\ngot: %#v", wanted, signals)
@@ -152,7 +152,7 @@ func TestPackagingCommandDistinguishesBuildFromPackage(t *testing.T) {
 	}{
 		{command: "cargo build"},
 		{command: "npm run build"},
-		{command: "cargo package", kind: packagingKindPackage, name: "cargo"},
+		{command: "cargo package", kind: packagingKindPackage, name: packagingNameCargo},
 		{command: "gem build example.gemspec", kind: packagingKindPackage, name: "RubyGems"},
 		{command: "mvn clean package", kind: packagingKindPackage, name: packagingNameMaven},
 		{command: "mvn -B clean deploy", kind: packagingKindPublish, name: packagingNameMaven},

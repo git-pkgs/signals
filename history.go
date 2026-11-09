@@ -199,6 +199,18 @@ func (s *commitStateStore) release(hash plumbing.Hash) {
 	delete(s.states, hash)
 }
 
+type logScan struct {
+	repo      *githistory.Repo
+	local     *localDetectors
+	cache     *blobCache
+	stats     *scanStats
+	states    *commitStateStore
+	refEvents map[plumbing.Hash][]jsonlSignal
+	opts      LogOptions
+	stdout    io.Writer
+	stderr    io.Writer
+}
+
 func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err error) {
 	repo, err := githistory.Open(path)
 	if err != nil {
@@ -232,67 +244,18 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err err
 	if err := snapshots.writeStart(stdout, opts.JSONL); err != nil {
 		return err
 	}
-	err = repo.WalkCommits(walk, func(commit githistory.Commit) error {
-		forceFull := len(commit.Object.ParentHashes) == 0
-		parent := emptyCommitState()
-		var parentHash plumbing.Hash
-		if len(commit.Object.ParentHashes) > 0 {
-			parentHash = commit.Object.ParentHashes[0]
-			var ok bool
-			parent, ok = states.get(parentHash)
-			if !ok {
-				parentCommit, err := repo.Repository().CommitObject(parentHash)
-				if err != nil {
-					return err
-				}
-				parent, err = detectFullCommitState(parentCommit, local, cache, stats)
-				if err != nil {
-					return err
-				}
-				states.retain(parentHash, parent)
-				forceFull = true
-			}
-		}
-
-		current, err := detectCommitState(
-			commit.Object,
-			parent,
-			commit.Changes,
-			forceFull,
-			local,
-			cache,
-			stats,
-		)
-		if err != nil {
-			return err
-		}
-		if !parentHash.IsZero() {
-			states.release(parentHash)
-		}
-		states.retain(commit.Object.Hash, current)
-		stats.commits++
-		if opts.Progress > 0 && stats.commits%opts.Progress == 0 {
-			if _, err := fmt.Fprintf(stderr, "signals: scanned %d commits\n", stats.commits); err != nil {
-				return err
-			}
-		}
-		if !dateInRange(commit.Object.Committer.When, opts.After, opts.Before) {
-			return nil
-		}
-
-		var changes []signalChange
-		var errorChanges []errorChange
-		if len(commit.Object.ParentHashes) <= 1 {
-			changes = diffSignals(parent.signals, current.signals)
-			errorChanges = diffErrors(parent.errors, current.errors)
-		}
-		events := append(commitEvents(commit.Object), refEvents[commit.Object.Hash]...)
-		sortEventSignals(events)
-		if err := writeCommitRecords(stdout, stderr, commit.Object, changes, errorChanges, events, opts.JSONL); err != nil {
-			return err
-		}
-		return nil
-	})
+	scan := logScan{
+		repo:      repo,
+		local:     local,
+		cache:     cache,
+		stats:     stats,
+		states:    states,
+		refEvents: refEvents,
+		opts:      opts,
+		stdout:    stdout,
+		stderr:    stderr,
+	}
+	err = repo.WalkCommits(walk, scan.visit)
 	if err == nil {
 		err = snapshots.finish(stdout, opts.JSONL)
 	}
@@ -300,6 +263,72 @@ func logSignals(path string, opts LogOptions, stdout, stderr io.Writer) (err err
 		err = errors.Join(err, printStats(stderr, stats))
 	}
 	return err
+}
+
+func (s *logScan) visit(commit githistory.Commit) error {
+	parent, parentHash, forceFull, err := s.parentState(commit)
+	if err != nil {
+		return err
+	}
+	current, err := detectCommitState(
+		commit.Object,
+		parent,
+		commit.Changes,
+		forceFull,
+		s.local,
+		s.cache,
+		s.stats,
+	)
+	if err != nil {
+		return err
+	}
+	if !parentHash.IsZero() {
+		s.states.release(parentHash)
+	}
+	s.states.retain(commit.Object.Hash, current)
+	s.stats.commits++
+	if s.opts.Progress > 0 && s.stats.commits%s.opts.Progress == 0 {
+		if _, err := fmt.Fprintf(s.stderr, "signals: scanned %d commits\n", s.stats.commits); err != nil {
+			return err
+		}
+	}
+	if !dateInRange(commit.Object.Committer.When, s.opts.After, s.opts.Before) {
+		return nil
+	}
+	return s.writeRecords(commit, parent, current)
+}
+
+func (s *logScan) parentState(commit githistory.Commit) (commitState, plumbing.Hash, bool, error) {
+	if len(commit.Object.ParentHashes) == 0 {
+		return emptyCommitState(), plumbing.ZeroHash, true, nil
+	}
+	parentHash := commit.Object.ParentHashes[0]
+	parent, ok := s.states.get(parentHash)
+	if ok {
+		return parent, parentHash, false, nil
+	}
+	parentCommit, err := s.repo.Repository().CommitObject(parentHash)
+	if err != nil {
+		return commitState{}, plumbing.ZeroHash, false, err
+	}
+	parent, err = detectFullCommitState(parentCommit, s.local, s.cache, s.stats)
+	if err != nil {
+		return commitState{}, plumbing.ZeroHash, false, err
+	}
+	s.states.retain(parentHash, parent)
+	return parent, parentHash, true, nil
+}
+
+func (s *logScan) writeRecords(commit githistory.Commit, parent, current commitState) error {
+	var changes []signalChange
+	var errorChanges []errorChange
+	if len(commit.Object.ParentHashes) <= 1 {
+		changes = diffSignals(parent.signals, current.signals)
+		errorChanges = diffErrors(parent.errors, current.errors)
+	}
+	events := append(commitEvents(commit.Object), s.refEvents[commit.Object.Hash]...)
+	sortEventSignals(events)
+	return writeCommitRecords(s.stdout, s.stderr, commit.Object, changes, errorChanges, events, s.opts.JSONL)
 }
 
 func loadBoundarySnapshot(

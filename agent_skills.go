@@ -26,7 +26,7 @@ func agentSkillSignals(tree fs.FS) ([]Signal, error) {
 		if parseErr != nil {
 			signals = append(signals, Signal{
 				Check: checkAgentSkill,
-				Kind:  "invalid",
+				Kind:  signalInvalid,
 				Name:  parseErr.Error(),
 			})
 			return nil

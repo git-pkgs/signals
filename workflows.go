@@ -22,6 +22,8 @@ const (
 	permissionKindReusableCall    = "reusableCall"
 	permissionKindReusableJob     = "reusableJob"
 	permissionKindReusableTop     = "reusableTopLevel"
+	workflowExpressionOpening     = "${{"
+	workflowExpressionClosing     = "}}"
 )
 
 var dangerousToJSONPattern = regexp.MustCompile(`(?i)tojson\s*\(\s*github(?:\.event)?\s*\)`)
@@ -233,12 +235,12 @@ func shellWorkflowSignals(
 func sanitizeWorkflowExpressions(script string) string {
 	data := []byte(script)
 	for search := 0; search < len(data); {
-		relative := bytes.Index(data[search:], []byte("${{"))
+		relative := bytes.Index(data[search:], []byte(workflowExpressionOpening))
 		if relative < 0 {
 			break
 		}
 		start := search + relative
-		end := workflowExpressionEnd(data, start+3)
+		end := workflowExpressionEnd(data, start+len(workflowExpressionOpening))
 		if end < 0 {
 			break
 		}
@@ -276,7 +278,7 @@ func workflowExpressionEnd(data []byte, start int) int {
 			continue
 		}
 		if current == '}' && index+1 < len(data) && data[index+1] == '}' {
-			return index + 2
+			return index + len(workflowExpressionClosing)
 		}
 	}
 	return -1

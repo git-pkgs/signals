@@ -23,6 +23,11 @@ const (
 	shellOperationUpdate    = "update"
 	shellStateUnverified    = "unverified"
 	shellCommandCurl        = "curl"
+	commandNameEnv          = "env"
+	commandNamePython       = "python"
+	commandNamePython3      = "python3"
+	commandNameSudo         = "sudo"
+	shellDownloadDynamic    = "dynamic"
 )
 
 var (
@@ -32,7 +37,7 @@ var (
 	shellLanguageName    = map[string]bool{"bash": true, "dash": true, "ksh": true, "sh": true, "zsh": true}
 	shellInterpreterName = map[string]bool{
 		"node": true, "nodejs": true,
-		"perl": true, "php": true, "python": true, "python2": true, "python3": true,
+		"perl": true, "php": true, commandNamePython: true, "python2": true, commandNamePython3: true,
 		"ruby": true,
 	}
 )
@@ -307,12 +312,12 @@ func normalizeShellCommand(args []string) []string {
 		switch name {
 		case "command", "exec":
 			args = args[1:]
-		case "env", "sudo":
+		case commandNameEnv, commandNameSudo:
 			args = args[1:]
 			for len(args) > 0 && (strings.HasPrefix(args[0], "-") || strings.Contains(args[0], "=")) {
 				args = args[1:]
 			}
-		case "python", "python2", "python3":
+		case commandNamePython, "python2", commandNamePython3:
 			if len(args) > 2 && args[1] == "-m" {
 				args = args[2:]
 				continue
@@ -340,7 +345,7 @@ func shellDownloads(args []string, statement *syntax.Stmt, line uint) []*shellDo
 		if !ok {
 			continue
 		}
-		if name == "dynamic" {
+		if name == shellDownloadDynamic {
 			continue
 		}
 		downloads = append(downloads, &shellDownload{
@@ -349,7 +354,7 @@ func shellDownloads(args []string, statement *syntax.Stmt, line uint) []*shellDo
 	}
 	if len(downloads) == 0 {
 		downloads = append(downloads, &shellDownload{
-			line: line, order: statement.Pos().Offset(), name: "dynamic", state: shellStateUnverified, output: output,
+			line: line, order: statement.Pos().Offset(), name: shellDownloadDynamic, state: shellStateUnverified, output: output,
 		})
 	}
 	return downloads
@@ -375,7 +380,7 @@ func shellDownloadIdentity(argument string) (name, state string, ok bool) {
 		if err == nil && parsed.Scheme != "" && parsed.Host != "" {
 			return parsed.Host, shellStateUnverified, true
 		}
-		return "dynamic", shellStateUnverified, true
+		return shellDownloadDynamic, shellStateUnverified, true
 	}
 	parsed, err := url.Parse(argument)
 	if err != nil || parsed.Scheme == "" {

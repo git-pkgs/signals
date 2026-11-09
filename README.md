@@ -179,7 +179,7 @@ The additional detectors use the same persistent signal model. A threat-surface 
 | Dependency-Update-Config | Dependabot and Renovate configuration, including package managers, directories, schedules, cooldowns, groups, and semantic configuration changes |
 | Package-Manager | The selected package manager for each detected package ecosystem and project directory |
 | Package-File | Manifest and lockfile presence, including files recognized by package-manager definitions before dependency parsing is available |
-| Package-Provenance | Explicit npm publication provenance settings in `publishConfig.provenance` or `.npmrc` |
+| Package-Provenance | Explicit npm provenance settings in parsed manifests or `.npmrc`, npm publish flags or environment settings in workflows, and PyPI publication configured with an OIDC token and no password or uv token |
 | Dependency-Constraint | Ranged, unparsed, and unversioned direct dependency constraints as written in parsed manifests |
 | Dependency-Pin | Exact direct dependency constraints found in parsed manifests |
 | Dependency-Pinning | Exact, ranged, unparsed, and resolved dependency counts from manifests and lockfiles |
@@ -190,7 +190,6 @@ The additional detectors use the same persistent signal model. A threat-surface 
 | Cache-Mode | Explicit workflow and job cache access modes parsed from Actions workflows |
 | Job-Timeout | Configured Actions job timeouts, including expression-backed values |
 | Packaging | Literal packaging and publication commands or known publication Actions; presence does not show that a workflow ran |
-| Package-Provenance | Explicit npm provenance flags or environment settings, and PyPI publication configured with an OIDC token |
 | Runner-Selection | Explicit self-hosted runner labels, runner groups, and dynamic runner expressions in GitHub Actions jobs |
 | SARIF | Bounded summaries of committed SARIF tools, result counts and levels, baselines, rules, suppressions, and CWE taxa with names and categories |
 | Package-Parse | Package files that were identified but could not be parsed |
@@ -218,6 +217,7 @@ The local detectors share parsers and changed-path caches across related signals
 - [`github.com/git-pkgs/attestation`](https://github.com/git-pkgs/attestation) parses claims from in-toto statements, DSSE envelopes, and Sigstore bundles without performing verification.
 - [`github.com/git-pkgs/magic`](https://github.com/git-pkgs/magic) detects binary content.
 - [`github.com/git-pkgs/certs`](https://github.com/git-pkgs/certs) scans bounded certificate files, trust stores, and small archives.
+- [`github.com/git-pkgs/changelog`](https://github.com/git-pkgs/changelog) parses headings and list entries from changelog files.
 - [`github.com/git-pkgs/gitignore`](https://github.com/git-pkgs/gitignore) resolves effective ignore rules and returns their source pattern and line.
 - [`github.com/git-pkgs/integrity`](https://github.com/git-pkgs/integrity) parses and normalizes Subresource Integrity metadata.
 - [`github.com/git-pkgs/licenses`](https://github.com/git-pkgs/licenses) identifies license text, notices, and SPDX declarations with its embedded ScanCode corpus.
@@ -229,10 +229,12 @@ The local detectors share parsers and changed-path caches across related signals
 - [`github.com/git-pkgs/cwe`](https://github.com/git-pkgs/cwe) adds names and categories to CWE taxa referenced by SARIF results.
 - [`github.com/git-pkgs/brief`](https://github.com/git-pkgs/brief) detects CI systems, build tools, security tools, and pre-commit runners from an `fs.FS` commit tree.
 - [`github.com/git-pkgs/languages`](https://github.com/git-pkgs/languages) detects source languages from paths and blob content.
+- [`github.com/git-pkgs/mailmap`](https://github.com/git-pkgs/mailmap) canonicalizes contributor identities for commit metrics.
 - [`github.com/git-pkgs/reuse`](https://github.com/git-pkgs/reuse) resolves SPDX headers, sidecars, REUSE.toml annotations, and DEP5 metadata from an `fs.FS` commit tree.
 - [`github.com/git-pkgs/roles`](https://github.com/git-pkgs/roles) classifies CI, fuzz, legal, generated, vendored, and packaging paths.
 - [`github.com/git-pkgs/secrets`](https://github.com/git-pkgs/secrets) scans changed blob content with its embedded local rule corpus.
 - [`github.com/git-pkgs/skills`](https://github.com/git-pkgs/skills) discovers and parses Agent Skill packages from commit trees.
+- [`github.com/git-pkgs/vers`](https://github.com/git-pkgs/vers) parses native package constraints for dependency classification.
 
 Actionlint parses each changed Actions workflow once for Artifact-Provenance, Dangerous-Workflow, SAST, Token-Permissions, Cache-Mode, Job-Timeout, Packaging, Package-Provenance, and Runner-Selection signals. Package parsing separately records Actions references and their pinning state. Packaging observations cover known Actions and literal commands in `run:` steps without treating their presence as evidence of a successful workflow run. Package provenance requires an explicit npm setting, or an OIDC-enabled PyPI publication without a configured password or uv token. Runner observations record configuration without determining which machine handled a particular job.
 

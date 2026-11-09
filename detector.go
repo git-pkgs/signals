@@ -35,6 +35,7 @@ const (
 	signalKindLicense          = "license"
 	signalKindNotice           = "notice"
 	signalKindTool             = "tool"
+	signalInvalid              = "invalid"
 	sastToolSonar              = "Sonar"
 )
 
@@ -54,7 +55,8 @@ func sortSignals(signals []Signal) {
 }
 
 func deduplicateSignals(signals []Signal) []Signal {
-	if len(signals) < 2 {
+	const minimumInput = 2
+	if len(signals) < minimumInput {
 		return signals
 	}
 	result := signals[:1]

@@ -280,36 +280,41 @@ func (s *commitStream) evictBefore(cutoff time.Time) {
 			write++
 			continue
 		}
-		s.commits--
-		if entry.signed {
-			s.signedCommits--
-		}
-		if entry.human {
-			s.humanCommits--
-			if entry.contributor != "" {
-				s.contributors[entry.contributor]--
-				if s.contributors[entry.contributor] == 0 {
-					delete(s.contributors, entry.contributor)
-					if entry.domain != "" {
-						s.domains[entry.domain]--
-						if s.domains[entry.domain] == 0 {
-							delete(s.domains, entry.domain)
-						}
-					}
-				}
-			}
-			if len(entry.reviewProxies) > 0 {
-				s.reviewedHumanCommits--
-			}
-			for _, proxy := range entry.reviewProxies {
-				s.reviewProxyCounts[proxy]--
-			}
-		}
+		s.removeEntry(entry)
 	}
 	for i := write; i < len(s.entries); i++ {
 		s.entries[i] = commitWindowEntry{}
 	}
 	s.entries = s.entries[:write]
+}
+
+func (s *commitStream) removeEntry(entry commitWindowEntry) {
+	s.commits--
+	if entry.signed {
+		s.signedCommits--
+	}
+	if !entry.human {
+		return
+	}
+	s.humanCommits--
+	if entry.contributor != "" {
+		s.contributors[entry.contributor]--
+		if s.contributors[entry.contributor] == 0 {
+			delete(s.contributors, entry.contributor)
+			if entry.domain != "" {
+				s.domains[entry.domain]--
+				if s.domains[entry.domain] == 0 {
+					delete(s.domains, entry.domain)
+				}
+			}
+		}
+	}
+	if len(entry.reviewProxies) > 0 {
+		s.reviewedHumanCommits--
+	}
+	for _, proxy := range entry.reviewProxies {
+		s.reviewProxyCounts[proxy]--
+	}
 }
 
 func commitEvents(commit *object.Commit) []jsonlSignal {

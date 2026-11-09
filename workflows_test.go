@@ -372,7 +372,7 @@ jobs:
 		{
 			Check: checkShellDependency,
 			Kind:  shellKindPackageCommand,
-			Name:  "cargo",
+			Name:  packagingNameCargo,
 			Value: shellOperationUpdate,
 			Path:  testWorkflowPath,
 			Line:  13,
@@ -448,7 +448,7 @@ jobs:
 	if !containsExactSignal(signals, wanted) {
 		t.Fatalf("workflow download signal missing: %#v\ngot: %#v", wanted, signals)
 	}
-	if containsShellSignalName(signals, "dynamic") {
+	if containsShellSignalName(signals, shellDownloadDynamic) {
 		t.Fatalf("dynamic workflow download emitted with concrete URL: %#v", signals)
 	}
 }

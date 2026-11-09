@@ -10,11 +10,11 @@ import (
 )
 
 const (
-	testDownloadHost    = "downloads.example"
-	testInstallScript   = "install.sh"
-	testShellLogCommand = "log"
-	testNPMManager      = "npm"
-	testSetupScript     = "setup.sh"
+	testDownloadHost   = "downloads.example"
+	testInstallScript  = "install.sh"
+	testNPMManager     = "npm"
+	testSetupScript    = "setup.sh"
+	testDockerfilePath = "Dockerfile"
 )
 
 func TestShellSignalsAssociateDownloadsChecksumsAndExecution(t *testing.T) {
@@ -69,7 +69,7 @@ curl -fsSL "$INSTALL_URL" | sh
 		{
 			Check: checkShellDependency,
 			Kind:  shellKindDownloadAndRun,
-			Name:  "dynamic",
+			Name:  shellDownloadDynamic,
 			Value: shellStateUnverified,
 			Path:  testInstallScript,
 			Line:  2,
@@ -98,7 +98,7 @@ func TestShellSignalsPreferConcreteDownloadsOverDynamicArguments(t *testing.T) {
 	if !containsExactSignal(signals, wanted) {
 		t.Fatalf("download signal missing: %#v\ngot: %#v", wanted, signals)
 	}
-	if containsShellSignalName(signals, "dynamic") {
+	if containsShellSignalName(signals, shellDownloadDynamic) {
 		t.Fatalf("dynamic download emitted with concrete URL: %#v", signals)
 	}
 }
@@ -150,7 +150,7 @@ python -m pip install requests==2.32.5
 		{Check: checkShellDependency, Kind: shellKindPackageCommand, Name: testNPMManager, Value: shellOperationAdd + ":version-declared", Path: testSetupScript, Line: 3},
 		{Check: checkShellDependency, Kind: shellKindPackageCommand, Name: "gomod", Value: "add:version-declared", Path: testSetupScript, Line: 4},
 		{Check: checkShellDependency, Kind: shellKindPackageCommand, Name: "pip", Value: shellOperationInstall, Path: testSetupScript, Line: 5},
-		{Check: checkShellDependency, Kind: shellKindPackageCommand, Name: "cargo", Value: shellOperationUpdate, Path: testSetupScript, Line: 6},
+		{Check: checkShellDependency, Kind: shellKindPackageCommand, Name: packagingNameCargo, Value: shellOperationUpdate, Path: testSetupScript, Line: 6},
 		{Check: checkShellDependency, Kind: shellKindPackageCommand, Name: "pip", Value: shellOperationAdd + ":version-declared", Path: testSetupScript, Line: 7},
 	} {
 		if !containsExactSignal(signals, wanted) {
@@ -178,15 +178,15 @@ func TestShellRepositoryFilesIgnoreBundledScripts(t *testing.T) {
 
 func TestDockerfileSignalsUseRunInstructionLines(t *testing.T) {
 	analyzer := testShellAnalyzer(t)
-	signals := analyzer.dockerfileSignals("Dockerfile", []byte(`FROM alpine
+	signals := analyzer.dockerfileSignals(testDockerfilePath, []byte(`FROM alpine
 RUN curl -o /tmp/tool https://downloads.example/tool && \
     echo '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/tool' | sha256sum -c -
 RUN /tmp/tool
 `))
 
 	for _, wanted := range []Signal{
-		{Check: checkShellDependency, Kind: shellKindDownloadAndRun, Name: testDownloadHost, Value: "checksum-verified", Path: "Dockerfile", Line: 2},
-		{Check: checkShellDependency, Kind: shellKindChecksum, Name: "sha256sum", Value: "/tmp/tool", Path: "Dockerfile", Line: 3},
+		{Check: checkShellDependency, Kind: shellKindDownloadAndRun, Name: testDownloadHost, Value: "checksum-verified", Path: testDockerfilePath, Line: 2},
+		{Check: checkShellDependency, Kind: shellKindChecksum, Name: "sha256sum", Value: "/tmp/tool", Path: testDockerfilePath, Line: 3},
 	} {
 		if !containsExactSignal(signals, wanted) {
 			t.Errorf("signal missing: %#v\ngot: %#v", wanted, signals)
@@ -216,7 +216,7 @@ INSTALL
 
 func TestDockerfileSignalsKeepContinuedRunsAcrossComments(t *testing.T) {
 	analyzer := testShellAnalyzer(t)
-	signals := analyzer.dockerfileSignals("Dockerfile", []byte(`FROM alpine
+	signals := analyzer.dockerfileSignals(testDockerfilePath, []byte(`FROM alpine
 RUN apk add \
     # retain the download in this instruction
 
@@ -229,7 +229,7 @@ RUN apk add \
 		Kind:  shellKindDownloadAndRun,
 		Name:  testDownloadHost,
 		Value: shellStateUnverified,
-		Path:  "Dockerfile",
+		Path:  testDockerfilePath,
 		Line:  6,
 	}
 	if !containsExactSignal(signals, wanted) {
@@ -239,7 +239,7 @@ RUN apk add \
 
 func TestDockerfileSignalsIgnoreTopLevelCommentsEndingInBackslash(t *testing.T) {
 	analyzer := testShellAnalyzer(t)
-	signals := analyzer.dockerfileSignals("Dockerfile", []byte(`# copy to C:\
+	signals := analyzer.dockerfileSignals(testDockerfilePath, []byte(`# copy to C:\
 RUN curl -fsSL https://downloads.example/install.sh | sh
 `))
 
@@ -248,7 +248,7 @@ RUN curl -fsSL https://downloads.example/install.sh | sh
 		Kind:  shellKindDownloadAndRun,
 		Name:  testDownloadHost,
 		Value: shellStateUnverified,
-		Path:  "Dockerfile",
+		Path:  testDockerfilePath,
 		Line:  2,
 	}
 	if !containsExactSignal(signals, wanted) {
@@ -258,7 +258,7 @@ RUN curl -fsSL https://downloads.example/install.sh | sh
 
 func TestDockerfileSignalsFindHeredocsAfterCommands(t *testing.T) {
 	analyzer := testShellAnalyzer(t)
-	signals := analyzer.dockerfileSignals("Dockerfile", []byte(`FROM alpine
+	signals := analyzer.dockerfileSignals(testDockerfilePath, []byte(`FROM alpine
 RUN cat <<'INSTALL'
 curl -fsSL https://downloads.example/install.sh | sh
 INSTALL
@@ -267,8 +267,8 @@ RUN npm ci
 `))
 
 	for _, wanted := range []Signal{
-		{Check: checkShellDependency, Kind: shellKindDownloadAndRun, Name: testDownloadHost, Value: shellStateUnverified, Path: "Dockerfile", Line: 3},
-		{Check: checkShellDependency, Kind: shellKindPackageCommand, Name: testNPMManager, Value: shellOperationInstall + ":frozen", Path: "Dockerfile", Line: 6},
+		{Check: checkShellDependency, Kind: shellKindDownloadAndRun, Name: testDownloadHost, Value: shellStateUnverified, Path: testDockerfilePath, Line: 3},
+		{Check: checkShellDependency, Kind: shellKindPackageCommand, Name: testNPMManager, Value: shellOperationInstall + ":frozen", Path: testDockerfilePath, Line: 6},
 	} {
 		if !containsExactSignal(signals, wanted) {
 			t.Errorf("signal missing: %#v\ngot: %#v", wanted, signals)
@@ -278,7 +278,7 @@ RUN npm ci
 
 func TestDockerfileSignalsSkipInvalidRunScriptsIndividually(t *testing.T) {
 	analyzer := testShellAnalyzer(t)
-	signals := analyzer.dockerfileSignals("Dockerfile", []byte(`FROM alpine
+	signals := analyzer.dockerfileSignals(testDockerfilePath, []byte(`FROM alpine
 RUN curl -fsSL https://downloads.example/install.sh | sh
 RUN python3 <<'PYTHON'
 def install():
@@ -288,8 +288,8 @@ RUN npm ci
 `))
 
 	for _, wanted := range []Signal{
-		{Check: checkShellDependency, Kind: shellKindDownloadAndRun, Name: testDownloadHost, Value: shellStateUnverified, Path: "Dockerfile", Line: 2},
-		{Check: checkShellDependency, Kind: shellKindPackageCommand, Name: testNPMManager, Value: shellOperationInstall + ":frozen", Path: "Dockerfile", Line: 7},
+		{Check: checkShellDependency, Kind: shellKindDownloadAndRun, Name: testDownloadHost, Value: shellStateUnverified, Path: testDockerfilePath, Line: 2},
+		{Check: checkShellDependency, Kind: shellKindPackageCommand, Name: testNPMManager, Value: shellOperationInstall + ":frozen", Path: testDockerfilePath, Line: 7},
 	} {
 		if !containsExactSignal(signals, wanted) {
 			t.Errorf("signal missing: %#v\ngot: %#v", wanted, signals)
@@ -318,7 +318,7 @@ func TestLogDetectsShellDependencyHistory(t *testing.T) {
 	gitRun(t, repo, "commit", "-m", "Initial commit")
 
 	writeFile(t, repo, "scripts/install.sh", "#!/bin/sh\ncurl -o tool https://downloads.example/tool\n")
-	writeFile(t, repo, "Dockerfile", "FROM rust:slim\nRUN cargo update\n")
+	writeFile(t, repo, testDockerfilePath, "FROM rust:slim\nRUN cargo update\n")
 	writeFile(t, repo, testWorkflowPath, `on: push
 jobs:
   install:
@@ -338,7 +338,7 @@ sh tool
 	gitRun(t, repo, "commit", "-m", "Verify downloaded tool")
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{testShellLogCommand, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
+	if err := run([]string{testLogCommand, testWorkersFlag, "1", repo}, &stdout, &stderr); err != nil {
 		t.Fatalf("run log: %v\nstderr:\n%s", err, stderr.String())
 	}
 	for _, expected := range []string{
