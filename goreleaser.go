@@ -18,6 +18,7 @@ const (
 	goreleaserGPGCommand      = "gpg"
 	goreleaserNFPMCommand     = "nfpm"
 	goreleaserArtifactsNone   = "none"
+	goreleaserArtifactsSource = "source"
 )
 
 type goreleaserConfig struct {
@@ -229,14 +230,14 @@ func goreleaserPackageSigningConfigured(settings goreleaserNFPMSettings, format 
 }
 
 func effectiveSignIDs(kind, artifacts string, ids []string) []string {
-	if kind == goreleaserKindSign && (artifacts == "checksum" || artifacts == "source") {
+	if kind == goreleaserKindSign && (artifacts == "checksum" || artifacts == goreleaserArtifactsSource) {
 		return nil
 	}
 	return ids
 }
 
 func effectiveSBOMIDs(artifacts string, ids []string) []string {
-	if artifacts == "source" || artifacts == "any" {
+	if artifacts == goreleaserArtifactsSource || artifacts == "any" {
 		return nil
 	}
 	return ids
