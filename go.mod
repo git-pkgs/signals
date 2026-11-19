@@ -5,7 +5,7 @@ go 1.27.3
 require (
 	actionlint.kjanat.dev v1.17.1
 	github.com/git-pkgs/attestation v0.2.0
-	github.com/git-pkgs/brief v0.15.1-0.20261108084518-18ecb564809a
+	github.com/git-pkgs/brief v0.16.0
 	github.com/git-pkgs/certs v0.1.1-0.20261104093717-2e1d0e2e0f63
 	github.com/git-pkgs/changelog v0.2.2-0.20261109091041-6b24a521bafa
 	github.com/git-pkgs/cwe v0.1.2-0.20261102114243-2d9276da42a5
@@ -47,7 +47,7 @@ require (
 	github.com/expr-lang/expr v1.17.8 // indirect
 	github.com/fatih/color v1.19.0 // indirect
 	github.com/flier/gohs v1.2.3 // indirect
-	github.com/git-pkgs/archives v0.10.0 // indirect
+	github.com/git-pkgs/archives v0.11.0 // indirect
 	github.com/git-pkgs/bibtex v0.1.0 // indirect
 	github.com/git-pkgs/citation v0.1.0 // indirect
 	github.com/git-pkgs/codemeta v0.3.0 // indirect
@@ -60,7 +60,7 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/hashicorp/go-version v1.9.0 // indirect
 	github.com/kevinburke/ssh_config v1.6.0 // indirect
-	github.com/klauspost/compress v1.20.3 // indirect
+	github.com/klauspost/compress v1.20.4 // indirect
 	github.com/mattn/go-colorable v0.1.16 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mattn/go-runewidth v0.0.31 // indirect
@@ -78,5 +78,5 @@ require (
 	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/exp v0.0.0-20261106112924-d498a4c2cc9a // indirect
 	golang.org/x/sync v0.24.0 // indirect
-	golang.org/x/sys v0.49.0 // indirect
+	golang.org/x/sys v0.50.0 // indirect
 )
