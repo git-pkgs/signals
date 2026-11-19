@@ -3,7 +3,7 @@ module github.com/git-pkgs/signals
 go 1.27.3
 
 require (
-	actionlint.kjanat.dev v1.17.0
+	actionlint.kjanat.dev v1.17.1
 	github.com/git-pkgs/attestation v0.0.0-20261107211851-c6512096e555
 	github.com/git-pkgs/brief v0.15.1-0.20261108084518-18ecb564809a
 	github.com/git-pkgs/certs v0.1.1-0.20261104093717-2e1d0e2e0f63
