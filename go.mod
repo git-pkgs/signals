@@ -27,7 +27,7 @@ require (
 	github.com/git-pkgs/spdx v0.3.6
 	github.com/git-pkgs/vers v0.7.2
 	github.com/go-git/go-git/v6 v6.0.0-beta.1
-	github.com/tidwall/jsonc v0.3.3
+	github.com/tidwall/jsonc v0.3.4
 	github.com/titanous/json5 v1.0.0
 	go.yaml.in/yaml/v3 v3.0.6
 	golang.org/x/net v0.62.0
